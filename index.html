@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>HC PRO DJ HUMBERTO 2.1</title>
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+<div class="background">
+    <div class="grid"></div>
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="laser laser1"></div>
+    <div class="laser laser2"></div>
+    <div class="particles"></div>
+</div>
+
+<header class="topbar">
+
+    <div class="brand">
+        <div class="brand-main">HC PRO</div>
+        <div class="brand-sub">DJ HUMBERTO</div>
+    </div>
+
+    <div class="version">
+        PRO 2.1
+    </div>
+
+    <button id="fullscreenBtn" class="top-btn">
+        ⛶ PANTALLA
+    </button>
+
+</header>
+
+
+<main>
+
+<section class="hero">
+
+    <div class="hero-content">
+
+        <div class="status-live">
+            <span></span>
+            HC PRO DJ SYSTEM
+        </div>
+
+        <h1>DJ HUMBERTO</h1>
+
+        <p>
+            PROFESSIONAL AUTOMATIC DJ MIXER
+        </p>
+
+    </div>
+
+</section>
+
+
+<section class="decks">
+
+<!-- DECK A -->
+
+<div class="deck deck-a">
+
+    <div class="deck-header">
+        <span>DECK A</span>
+        <span id="stateA" class="deck-state">STANDBY</span>
+    </div>
+
+    <div class="cover">
+        <div class="cover-logo">
+            HC<br>
+            <small>PRO</small>
+        </div>
+    </div>
+
+    <div class="track-info">
+
+        <div id="nameA" class="track-name">
+            Ninguna canción
+        </div>
+
+        <div id="genreA" class="track-genre">
+            —
+        </div>
+
+    </div>
+
+    <div class="time-row">
+
+        <span id="currentA">00:00</span>
+
+        <div class="progress">
+            <div id="barA"></div>
+        </div>
+
+        <span id="durationA">00:00</span>
+
+    </div>
+
+    <div class="deck-controls">
+
+        <button id="playA">▶</button>
+        <button id="pauseA">⏸</button>
+        <button id="nextA">⏭</button>
+
+    </div>
+
+    <label class="volume-control">
+        VOL A
+        <input
+            id="volumeA"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+        >
+    </label>
+
+    <audio id="mediaA" preload="auto"></audio>
+
+</div>
+
+
+<!-- MIXER -->
+
+<div class="mixer">
+
+    <div class="mixer-title">
+        HC PRO MIXER
+    </div>
+
+    <div class="auto-box">
+
+        <button id="autoBtn" class="auto-btn">
+            AUTO DJ OFF
+        </button>
+
+        <div id="autoIndicator" class="auto-indicator">
+            MANUAL
+        </div>
+
+    </div>
+
+
+    <div class="mixer-control">
+
+        <label>
+            CROSSFADE
+            <span id="fadeValue">10 s</span>
+        </label>
+
+        <input
+            id="fadeTime"
+            type="range"
+            min="4"
+            max="20"
+            value="10"
+        >
+
+    </div>
+
+
+    <div class="mixer-control">
+
+        <label>
+            CROSS FADER
+        </label>
+
+        <input
+            id="crossfader"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.5"
+        >
+
+        <div class="cf-labels">
+            <span>A</span>
+            <span>CENTER</span>
+            <span>B</span>
+        </div>
+
+    </div>
+
+
+    <div class="mixer-control">
+
+        <label>
+            MASTER
+        </label>
+
+        <input
+            id="master"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.9"
+        >
+
+    </div>
+
+
+    <button id="nextBtn" class="next-btn">
+        ⏭ SIGUIENTE
+    </button>
+
+
+    <div class="mic-panel">
+
+        <div class="mic-title">
+            🎤 MICRÓFONO
+        </div>
+
+        <button id="micBtn" class="mic-btn">
+            MIC OFF
+        </button>
+
+        <div id="micState" class="mic-state">
+            DESACTIVADO
+        </div>
+
+        <input
+            id="micVolume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.7"
+        >
+
+    </div>
+
+</div>
+
+
+<!-- DECK B -->
+
+<div class="deck deck-b">
+
+    <div class="deck-header">
+        <span>DECK B</span>
+        <span id="stateB" class="deck-state">STANDBY</span>
+    </div>
+
+    <div class="cover">
+        <div class="cover-logo">
+            DJ<br>
+            <small>HUMBERTO</small>
+        </div>
+    </div>
+
+    <div class="track-info">
+
+        <div id="nameB" class="track-name">
+            Ninguna canción
+        </div>
+
+        <div id="genreB" class="track-genre">
+            —
+        </div>
+
+    </div>
+
+    <div class="time-row">
+
+        <span id="currentB">00:00</span>
+
+        <div class="progress">
+            <div id="barB"></div>
+        </div>
+
+        <span id="durationB">00:00</span>
+
+    </div>
+
+    <div class="deck-controls">
+
+        <button id="playB">▶</button>
+        <button id="pauseB">⏸</button>
+        <button id="nextB">⏭</button>
+
+    </div>
+
+    <label class="volume-control">
+        VOL B
+        <input
+            id="volumeB"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+        >
+    </label>
+
+    <audio id="mediaB" preload="auto"></audio>
+
+</div>
+
+</section>
+
+
+<!-- LIBRARY -->
+
+<section class="library">
+
+    <div class="section-title">
+        🎵 BIBLIOTECA MUSICAL
+    </div>
+
+    <div class="file-controls">
+
+        <label class="file-btn">
+            🎵 CARGAR ARCHIVOS
+            <input
+                id="files"
+                type="file"
+                multiple
+                accept="audio/*,video/mp4,.mp3,.wav,.ogg,.m4a,.aac,.mp4"
+                hidden
+            >
+        </label>
+
+
+        <label class="file-btn">
+            📁 CARGAR CARPETA
+            <input
+                id="folder"
+                type="file"
+                webkitdirectory
+                directory
+                multiple
+                hidden
+            >
+        </label>
+
+
+        <select id="genre">
+
+            <option value="TODOS">
+                TODOS LOS GÉNEROS
+            </option>
+
+            <option value="CUMBIA">
+                CUMBIA
+            </option>
+
+            <option value="TROPICAL">
+                TROPICAL
+            </option>
+
+            <option value="CUARTETO">
+                CUARTETO
+            </option>
+
+            <option value="ROCK">
+                ROCK
+            </option>
+
+            <option value="POP">
+                POP
+            </option>
+
+            <option value="ELECTRONICA">
+                ELECTRÓNICA
+            </option>
+
+            <option value="FOLKLORE">
+                FOLKLORE
+            </option>
+
+            <option value="REGGAETON">
+                REGGAETÓN
+            </option>
+
+            <option value="ROMANTICA">
+                ROMÁNTICA
+            </option>
+
+            <option value="VARIADO">
+                VARIADO
+            </option>
+
+        </select>
+
+
+        <button id="shuffle">
+            🔀 SHUFFLE
+        </button>
+
+        <button id="clear">
+            🗑 LIMPIAR
+        </button>
+
+    </div>
+
+
+    <div class="library-info">
+
+        <span>
+            CANCIONES:
+            <strong id="count">0</strong>
+        </span>
+
+        <span id="shuffleStatus">
+            SHUFFLE OFF
+        </span>
+
+    </div>
+
+
+    <div id="playlist" class="playlist"></div>
+
+</section>
+
+
+<!-- VISUALIZER -->
+
+<section class="visual-section">
+
+    <div class="section-title">
+        📊 AUDIO VISUALIZER
+    </div>
+
+    <canvas id="visualizer"></canvas>
+
+</section>
+
+</main>
+
+
+<footer>
+
+    <div>
+        HC PRO DJ HUMBERTO
+    </div>
+
+    <span>
+        PROFESSIONAL DJ SYSTEM · PRO 2.1
+    </span>
+
+</footer>
+
+
+<script src="dj.js"></script>
+
+</body>
+</html>
