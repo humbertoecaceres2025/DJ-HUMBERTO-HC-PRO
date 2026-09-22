@@ -454,3 +454,184 @@
 
 </body>
 </html>
+
+
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DJ HUMBERTO — HC PRO</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+<div class="cabina">
+
+  <header>
+    <div class="logo">
+      <span>DJ</span> HUMBERTO
+      <small>HC PRO</small>
+    </div>
+
+    <div class="live">
+      <i></i> LIVE DJ
+    </div>
+  </header>
+
+  <!-- LUCES -->
+  <div class="lights">
+    <div class="beam beam1"></div>
+    <div class="beam beam2"></div>
+    <div class="beam beam3"></div>
+    <div class="beam beam4"></div>
+  </div>
+
+  <!-- PANTALLA DE VIDEO -->
+  <section class="video-zone">
+
+    <div class="screen-title">
+      <span>HC PRO VISUAL</span>
+      <span id="videoStatus">VIDEO READY</span>
+    </div>
+
+    <video id="videoPlayer" controls>
+      Tu navegador no soporta video.
+    </video>
+
+    <div class="screen-glow"></div>
+
+  </section>
+
+  <!-- DECKS -->
+  <section class="decks">
+
+    <!-- DECK IZQUIERDO -->
+    <div class="deck">
+
+      <h2>DECK A</h2>
+
+      <div class="vinyl" id="vinylA">
+        <div class="vinyl-center">
+          <span>HC</span>
+        </div>
+      </div>
+
+      <div class="deck-controls">
+        <button onclick="toggleDeck('A')">▶ / ❚❚</button>
+        <button onclick="loadAudio('A')">🎵 AUDIO</button>
+      </div>
+
+    </div>
+
+    <!-- CONSOLA -->
+    <div class="mixer">
+
+      <h2>DJ MIXER</h2>
+
+      <div class="mixer-display">
+        <span id="trackName">SIN AUDIO</span>
+      </div>
+
+      <div class="channels">
+
+        <div class="channel">
+          <label>CH 1</label>
+          <input type="range" min="0" max="100" value="70"
+                 class="vertical">
+        </div>
+
+        <div class="channel">
+          <label>CH 2</label>
+          <input type="range" min="0" max="100" value="70"
+                 class="vertical">
+        </div>
+
+        <div class="channel">
+          <label>MASTER</label>
+          <input id="masterVolume"
+                 type="range"
+                 min="0"
+                 max="1"
+                 step="0.01"
+                 value="0.8">
+        </div>
+
+      </div>
+
+      <div class="crossfader">
+        <label>CROSSFADER</label>
+        <input type="range" min="0" max="100" value="50">
+      </div>
+
+      <div class="buttons">
+        <button onclick="playAudio()">▶ PLAY</button>
+        <button onclick="pauseAudio()">❚❚ PAUSE</button>
+        <button onclick="stopAudio()">■ STOP</button>
+      </div>
+
+    </div>
+
+    <!-- DECK DERECHO -->
+    <div class="deck">
+
+      <h2>DECK B</h2>
+
+      <div class="vinyl" id="vinylB">
+        <div class="vinyl-center">
+          <span>HC</span>
+        </div>
+      </div>
+
+      <div class="deck-controls">
+        <button onclick="toggleDeck('B')">▶ / ❚❚</button>
+        <button onclick="loadAudio('B')">🎵 AUDIO</button>
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ECUALIZADOR -->
+  <section class="equalizer">
+
+    <div class="bars">
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+    </div>
+
+  </section>
+
+  <!-- CONTROLES -->
+  <section class="media-controls">
+
+    <label class="file-button">
+      🎬 CARGAR VIDEO
+      <input type="file" id="videoFile" accept="video/*">
+    </label>
+
+    <label class="file-button">
+      🎵 CARGAR AUDIO
+      <input type="file" id="audioFile" accept="audio/*">
+    </label>
+
+    <button onclick="fullscreenVideo()">⛶ PANTALLA COMPLETA</button>
+
+  </section>
+
+  <footer>
+    DJ HUMBERTO — HC PRO
+    <span>RADIO • TV • DJ • PRODUCCIONES</span>
+  </footer>
+
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>
