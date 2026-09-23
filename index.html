@@ -250,3 +250,100 @@
 
 </body>
 </html>
+<!-- =====================================================
+     HC PRO SMART DJ
+     ===================================================== -->
+
+<section class="smart-dj">
+
+  <div class="smart-header">
+    <div>
+      <span class="smart-kicker">HC PRO INTELLIGENCE</span>
+      <h2>🧠 SMART DJ</h2>
+      <p>Selección inteligente de música y transiciones</p>
+    </div>
+
+    <div id="smartStatus" class="smart-status">
+      READY
+    </div>
+  </div>
+
+  <div class="current-track">
+
+    <div>
+      <small>CANCIÓN ACTUAL</small>
+      <strong id="smartCurrentTrack">
+        SIN CANCIÓN
+      </strong>
+    </div>
+
+    <div class="track-data">
+      <div>
+        <span>BPM</span>
+        <b id="currentBpm">--</b>
+      </div>
+
+      <div>
+        <span>KEY</span>
+        <b id="currentKey">--</b>
+      </div>
+
+      <div>
+        <span>ENERGÍA</span>
+        <b id="currentEnergy">--</b>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="smart-actions">
+
+    <button onclick="analyzeCurrentTrack()">
+      🔬 ANALIZAR ACTUAL
+    </button>
+
+    <label class="smart-file">
+      📚 AGREGAR MÚSICA
+      <input
+        id="smartLibraryInput"
+        type="file"
+        accept="audio/*"
+        multiple>
+    </label>
+
+    <button onclick="findBestNextTracks()">
+      🔍 BUSCAR SIGUIENTES
+    </button>
+
+    <button onclick="generateSmartPlaylist()">
+      🧠 CREAR PLAYLIST
+    </button>
+
+  </div>
+
+  <div class="compatibility-panel">
+
+    <div class="panel-title">
+      🎯 MEJORES TRANSICIONES
+    </div>
+
+    <div id="smartResults">
+      <div class="empty-smart">
+        Cargá música para comenzar el análisis.
+      </div>
+    </div>
+
+  </div>
+
+  <div class="smart-playlist">
+
+    <div class="panel-title">
+      📋 PLAYLIST INTELIGENTE
+    </div>
+
+    <ol id="smartPlaylist">
+    </ol>
+
+  </div>
+
+</section>
