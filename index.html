@@ -1,622 +1,250 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>HC PRO DJ HUMBERTO</title>
-
-<link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HC PRO DJ HUMBERTO</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
 
-<div class="cabina-light light1"></div>
-<div class="cabina-light light2"></div>
-<div class="cabina-light light3"></div>
+<div class="stage">
 
-<header class="topbar">
+  <!-- ILUMINACIÓN -->
+  <div class="light light-a"></div>
+  <div class="light light-b"></div>
+  <div class="light light-c"></div>
+  <div class="light light-d"></div>
+  <div class="laser laser-a"></div>
+  <div class="laser laser-b"></div>
+  <div id="strobe"></div>
 
+  <!-- CABECERA -->
+  <header class="topbar">
     <div class="brand">
-        <div class="brand-main">HC PRO</div>
-        <div class="brand-sub">DJ HUMBERTO</div>
+      <strong><span>DJ</span> HUMBERTO</strong>
+      <small>HC PRO • PROFESSIONAL DJ SYSTEM</small>
     </div>
 
-    <div class="top-status">
+    <div class="status">
+      <span class="led"></span>
+      <span id="systemStatus">SYSTEM READY</span>
+    </div>
+  </header>
 
-        <div class="status">
-            <span class="led"></span>
-            SYSTEM ONLINE
+  <!-- PANTALLA -->
+  <section class="visual-screen">
+
+    <div class="screen-head">
+      <span>HC PRO VISUAL</span>
+      <span id="videoState">READY</span>
+    </div>
+
+    <div class="video-wrap">
+      <video id="videoPlayer" controls playsinline></video>
+
+      <div class="screen-logo">
+        <strong>HC PRO</strong>
+        <span>DJ HUMBERTO</span>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- CABINA -->
+  <main class="console">
+
+    <!-- DECK A -->
+    <section class="deck" id="deckA">
+
+      <div class="deck-title">
+        <span>DECK A</span>
+        <b id="timeA">00:00</b>
+      </div>
+
+      <div class="turntable">
+        <div class="vinyl">
+          <div class="label">HC<br><small>PRO</small></div>
         </div>
+        <div class="needle"></div>
+      </div>
 
-        <div id="clock">00:00:00</div>
+      <div class="deck-info">
+        <span id="nameA">SIN PISTA</span>
+      </div>
 
-        <button id="fullscreenBtn">
-            ⛶ FULLSCREEN
-        </button>
+      <div class="deck-buttons">
+        <button onclick="loadDeck('A')">LOAD</button>
+        <button onclick="playDeck('A')">PLAY</button>
+        <button onclick="pauseDeck('A')">PAUSE</button>
+        <button onclick="stopDeck('A')">STOP</button>
+      </div>
 
-    </div>
-
-</header>
-
-
-<main class="dj-console">
-
-
-<!-- ================= DECK A ================= -->
-
-<section class="deck deck-a">
-
-    <div class="deck-header">
-
-        <div>
-            <span class="deck-label">DECK A</span>
-            <h2>DJ HC</h2>
-        </div>
-
-        <div class="deck-format">
-            A
-        </div>
-
-    </div>
-
-
-    <div class="track-display">
-
-        <div id="titleA">
-            SIN PISTA
-        </div>
-
-        <div id="timeA">
-            00:00 / 00:00
-        </div>
-
-    </div>
-
-
-    <div class="turntable">
-
-        <div class="platter platter-a">
-
-            <div class="vinyl">
-
-                <div class="vinyl-label">
-                    DJ<br>HC
-                </div>
-
-                <div class="needle"></div>
-
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <div class="wave">
-
-        <canvas id="waveA"></canvas>
-
-    </div>
-
-
-    <div class="deck-buttons">
-
-        <button id="loadA">
-            📂 CARGAR
-        </button>
-
-        <button id="playA" class="play">
-            ▶
-        </button>
-
-        <button id="pauseA">
-            ❚❚
-        </button>
-
-        <button id="cueA">
-            CUE
-        </button>
-
-    </div>
-
-
-    <div class="deck-controls">
-
-        <label>
-            VOLUMEN
-            <input
-                id="volumeA"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="1">
+      <div class="controls-row">
+        <label>GAIN
+          <input id="gainA" type="range" min="0" max="1" step=".01" value=".8">
         </label>
 
-        <label>
-            PITCH
-            <input
-                id="pitchA"
-                type="range"
-                min="-10"
-                max="10"
-                value="0">
+        <label>PITCH
+          <input id="pitchA" type="range" min=".9" max="1.1" step=".001" value="1">
+        </label>
+      </div>
+
+      <div class="eq">
+        <label>LOW<input id="lowA" type="range" min="-12" max="12" value="0"></label>
+        <label>MID<input id="midA" type="range" min="-12" max="12" value="0"></label>
+        <label>HIGH<input id="highA" type="range" min="-12" max="12" value="0"></label>
+      </div>
+
+    </section>
+
+    <!-- MIXER -->
+    <section class="mixer">
+
+      <div class="mixer-title">HC PRO MIXER</div>
+
+      <div class="master-display">
+        <span id="trackDisplay">NO TRACK LOADED</span>
+        <b id="bpmDisplay">-- BPM</b>
+      </div>
+
+      <div class="meters">
+        <div class="meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+
+      <div class="mixer-controls">
+
+        <label>MASTER
+          <input id="masterVolume" type="range" min="0" max="1" step=".01" value=".8">
         </label>
 
-    </div>
-
-
-    <div class="eq">
-
-        <label>
-            LOW
-            <input id="lowA" type="range"
-            min="-12" max="12" value="0">
+        <label>CROSSFADER
+          <input id="crossfader" type="range" min="0" max="1" step=".01" value=".5">
         </label>
 
-        <label>
-            MID
-            <input id="midA" type="range"
-            min="-12" max="12" value="0">
+      </div>
+
+      <div class="effects">
+
+        <button onclick="effect('echo')">ECHO</button>
+        <button onclick="effect('filter')">FILTER</button>
+        <button onclick="effect('flanger')">FLANGER</button>
+        <button onclick="effect('none')">CLEAR FX</button>
+
+      </div>
+
+      <div class="performance">
+
+        <button onclick="toggleAutoDJ()" id="autoButton">AUTO DJ</button>
+        <button onclick="toggleStrobe()" id="strobeButton">STROBE</button>
+        <button onclick="toggleLights()" id="lightsButton">LIGHTS</button>
+
+      </div>
+
+      <div class="file-controls">
+
+        <label class="file">
+          🎵 AUDIO
+          <input id="audioFile" type="file" accept="audio/*">
         </label>
 
-        <label>
-            HIGH
-            <input id="highA" type="range"
-            min="-12" max="12" value="0">
+        <label class="file">
+          🎬 VIDEO
+          <input id="videoFile" type="file" accept="video/*">
         </label>
 
-    </div>
+      </div>
 
-</section>
+    </section>
 
+    <!-- DECK B -->
+    <section class="deck" id="deckB">
 
+      <div class="deck-title">
+        <span>DECK B</span>
+        <b id="timeB">00:00</b>
+      </div>
 
-<!-- ================= CENTER ================= -->
-
-<section class="center-panel">
-
-
-    <div class="center-logo">
-
-        <div class="hc">
-            HC
+      <div class="turntable">
+        <div class="vinyl">
+          <div class="label">HC<br><small>PRO</small></div>
         </div>
-
-        <div class="pro">
-            PRO
-        </div>
-
-        <div class="dj-name">
-            DJ HUMBERTO
-        </div>
-
-    </div>
-
-
-    <div class="video-screen">
-
-        <video
-            id="videoPlayer"
-            playsinline
-            controls>
-        </video>
-
-        <div id="videoPlaceholder">
-
-            <div class="video-logo">
-                HC PRO
-            </div>
-
-            <div>
-                DJ HUMBERTO
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <div class="visualizer">
-
-        <canvas id="visualizer"></canvas>
-
-    </div>
-
-
-    <div class="vu-section">
-
-        <div class="vu">
-
-            <span>A</span>
-
-            <div class="vu-bar">
-                <div id="vuA"></div>
-            </div>
-
-        </div>
-
-
-        <div class="vu">
-
-            <span>B</span>
-
-            <div class="vu-bar">
-                <div id="vuB"></div>
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <div class="mixer">
-
-
-        <div class="mixer-channel">
-
-            <span>A</span>
-
-            <input
-                id="channelA"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="1">
-
-        </div>
-
-
-        <div class="cross">
-
-            <label>
-                A
-            </label>
-
-            <input
-                id="crossfader"
-                type="range"
-                min="-1"
-                max="1"
-                step="0.01"
-                value="0">
-
-            <label>
-                B
-            </label>
-
-        </div>
-
-
-        <div class="mixer-channel">
-
-            <span>B</span>
-
-            <input
-                id="channelB"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="1">
-
-        </div>
-
-
-        <div class="master">
-
-            MASTER
-
-            <input
-                id="masterVolume"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="0.8">
-
-        </div>
-
-    </div>
-
-
-    <div class="transport">
-
-        <button id="autoDJ">
-            🤖 AUTO DJ
-        </button>
-
-        <button id="shuffle">
-            🔀 SHUFFLE
-        </button>
-
-        <button id="loop">
-            🔁 LOOP
-        </button>
-
-        <button id="record">
-            ⏺ REC
-        </button>
-
-    </div>
-
-
-</section>
-
-
-
-<!-- ================= DECK B ================= -->
-
-<section class="deck deck-b">
-
-    <div class="deck-header">
-
-        <div>
-
-            <span class="deck-label">
-                DECK B
-            </span>
-
-            <h2>
-                HC PRO
-            </h2>
-
-        </div>
-
-        <div class="deck-format">
-            B
-        </div>
-
-    </div>
-
-
-    <div class="track-display">
-
-        <div id="titleB">
-            SIN PISTA
-        </div>
-
-        <div id="timeB">
-            00:00 / 00:00
-        </div>
-
-    </div>
-
-
-    <div class="turntable">
-
-        <div class="platter platter-b">
-
-            <div class="vinyl">
-
-                <div class="vinyl-label">
-                    HC<br>PRO
-                </div>
-
-                <div class="needle"></div>
-
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <div class="wave">
-
-        <canvas id="waveB"></canvas>
-
-    </div>
-
-
-    <div class="deck-buttons">
-
-        <button id="loadB">
-            📂 CARGAR
-        </button>
-
-        <button id="playB" class="play">
-            ▶
-        </button>
-
-        <button id="pauseB">
-            ❚❚
-        </button>
-
-        <button id="cueB">
-            CUE
-        </button>
-
-    </div>
-
-
-    <div class="deck-controls">
-
-        <label>
-            VOLUMEN
-
-            <input
-                id="volumeB"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="1">
-
+        <div class="needle"></div>
+      </div>
+
+      <div class="deck-info">
+        <span id="nameB">SIN PISTA</span>
+      </div>
+
+      <div class="deck-buttons">
+        <button onclick="loadDeck('B')">LOAD</button>
+        <button onclick="playDeck('B')">PLAY</button>
+        <button onclick="pauseDeck('B')">PAUSE</button>
+        <button onclick="stopDeck('B')">STOP</button>
+      </div>
+
+      <div class="controls-row">
+        <label>GAIN
+          <input id="gainB" type="range" min="0" max="1" step=".01" value=".8">
         </label>
 
-
-        <label>
-            PITCH
-
-            <input
-                id="pitchB"
-                type="range"
-                min="-10"
-                max="10"
-                value="0">
-
+        <label>PITCH
+          <input id="pitchB" type="range" min=".9" max="1.1" step=".001" value="1">
         </label>
+      </div>
 
+      <div class="eq">
+        <label>LOW<input id="lowB" type="range" min="-12" max="12" value="0"></label>
+        <label>MID<input id="midB" type="range" min="-12" max="12" value="0"></label>
+        <label>HIGH<input id="highB" type="range" min="-12" max="12" value="0"></label>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- VISUALIZADOR -->
+  <section class="visualizer">
+    <div class="visual-bars">
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+  </section>
+
+  <!-- BIBLIOTECA -->
+  <section class="library">
+
+    <div>
+      <h3>MEDIA LIBRARY</h3>
+      <p>Seleccioná audio o video desde tu PC.</p>
     </div>
 
+    <button onclick="loadDeck('A')">CARGAR DECK A</button>
+    <button onclick="loadDeck('B')">CARGAR DECK B</button>
 
-    <div class="eq">
+  </section>
 
-        <label>
-            LOW
+  <!-- GRABADOR -->
+  <section class="recorder">
 
-            <input
-                id="lowB"
-                type="range"
-                min="-12"
-                max="12"
-                value="0">
+    <span id="recStatus">REC READY</span>
 
-        </label>
+    <button onclick="startRecording()">● REC</button>
+    <button onclick="stopRecording()">■ STOP REC</button>
 
+  </section>
 
-        <label>
-            MID
+  <footer>
+    DJ HUMBERTO • HC PRO
+    <small>PROFESSIONAL DJ • RADIO • TV • PRODUCCIONES</small>
+  </footer>
 
-            <input
-                id="midB"
-                type="range"
-                min="-12"
-                max="12"
-                value="0">
-
-        </label>
-
-
-        <label>
-            HIGH
-
-            <input
-                id="highB"
-                type="range"
-                min="-12"
-                max="12"
-                value="0">
-
-        </label>
-
-    </div>
-
-</section>
-
-
-
-<!-- ================= LIBRARY ================= -->
-
-<section class="library">
-
-    <div class="library-header">
-
-        <h2>
-            🎵 BIBLIOTECA MUSICAL
-        </h2>
-
-        <button id="folderBtn">
-            📁 ABRIR CARPETA
-        </button>
-
-        <button id="filesBtn">
-            📂 AGREGAR ARCHIVOS
-        </button>
-
-    </div>
-
-
-    <div class="library-tools">
-
-        <input
-            id="search"
-            type="search"
-            placeholder="Buscar artista, canción o archivo...">
-
-
-        <select id="genreFilter">
-
-            <option value="all">
-                TODOS
-            </option>
-
-            <option>
-                CUMBIA
-            </option>
-
-            <option>
-                CUARTETO
-            </option>
-
-            <option>
-                ROCK
-            </option>
-
-            <option>
-                POP
-            </option>
-
-            <option>
-                ELECTRÓNICA
-            </option>
-
-            <option>
-                REGGAETON
-            </option>
-
-            <option>
-                OTROS
-            </option>
-
-        </select>
-
-    </div>
-
-
-    <div
-        id="libraryList"
-        class="library-list">
-
-        <div class="empty-library">
-
-            📂
-
-            <p>
-                Cargá tu música para comenzar
-            </p>
-
-        </div>
-
-    </div>
-
-</section>
-
-
-</main>
-
-
-<!-- INPUTS OCULTOS -->
-
-<input
-    type="file"
-    id="fileInput"
-    accept="audio/*,video/*"
-    multiple
-    hidden>
-
-
-<input
-    type="file"
-    id="folderInput"
-    webkitdirectory
-    directory
-    multiple
-    hidden>
-
+</div>
 
 <script src="dj.js"></script>
 
