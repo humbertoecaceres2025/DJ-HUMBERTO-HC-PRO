@@ -1,159 +1,557 @@
+/* =========================================================
+   HC PRO DJ HUMBERTO 3.0
+   PROFESSIONAL DJ SYSTEM
+   SINGLE INTEGRATED ENGINE
+========================================================= */
+
 (() => {
 
 "use strict";
 
 
 /* =========================================================
-   HC PRO DJ HUMBERTO 3.0
-   SMART DJ ENGINE
-   ========================================================= */
+   HELPERS
+========================================================= */
 
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-const clamp = (value,min,max) =>
-    Math.max(min,Math.min(max,value));
 
-const formatTime = seconds => {
+const clamp = (value, min, max) =>
+    Math.max(min, Math.min(max, value));
 
-    if(!isFinite(seconds))
+
+const dbToGain = (db) =>
+    Math.pow(10, db / 20);
+
+
+function formatTime(seconds) {
+
+    if (!Number.isFinite(seconds)) {
         return "00:00";
+    }
 
-    seconds = Math.max(0,seconds);
+    seconds = Math.max(0, Math.floor(seconds));
 
-    const minutes =
-        Math.floor(seconds / 60);
+    const minutes = Math.floor(seconds / 60);
 
-    const secs =
-        Math.floor(seconds % 60);
+    const secs = seconds % 60;
 
-    return String(minutes).padStart(2,"0")
-        + ":" +
-        String(secs).padStart(2,"0");
+    return (
+        String(minutes).padStart(2, "0") +
+        ":" +
+        String(secs).padStart(2, "0")
+    );
+}
+
+
+function safeText(value) {
+
+    return String(value ?? "")
+        .replace(/[&<>"']/g, char => {
+
+            const map = {
+
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#039;"
+
+            };
+
+            return map[char];
+
+        });
+
+}
+
+
+/* =========================================================
+   STATE
+========================================================= */
+
+const state = {
+
+    started: false,
+
+    activeDeck: "A",
+
+    autoDJ: false,
+
+    transitioning: false,
+
+    transitionSeconds: 10,
+
+    transitionMode: "crossfade",
+
+    library: [],
+
+    history: [],
+
+    smartQueue: [],
+
+    smartResults: [],
+
+    micOn: false,
+
+    recording: false,
+
+    recorder: null,
+
+    recordChunks: [],
+
+    micStream: null,
+
+    micSource: null,
+
+    nextPrepared: false,
+
+    currentTrack: null,
+
+    raf: null
+
 };
 
 
 /* =========================================================
    AUDIO ENGINE
-   ========================================================= */
+========================================================= */
 
-let audioContext = null;
+const audioEngine = {
 
-let masterGain = null;
+    ctx: null,
 
-let masterAnalyser = null;
+    masterGain: null,
 
-let recordDestination = null;
+    analyser: null,
 
-let recorder = null;
+    recordDestination: null,
 
-let recordingChunks = [];
+    micGain: null,
 
-let micSource = null;
+    decks: {},
 
-let micGain = null;
+    initialized: false
 
-let micStream = null;
-
-
-/* =========================================================
-   ESTADO
-   ========================================================= */
-
-let activeDeck = "A";
-
-let autoDJ = false;
-
-let autoTimer = null;
-
-let lightsEnabled = true;
-
-const library = [];
-
-const smartQueue = [];
-
-const playHistory =
-    JSON.parse(
-        localStorage.getItem("hcpro_history") || "[]"
-    );
+};
 
 
 /* =========================================================
-   IMPULSE RESPONSE PARA REVERB
-   ========================================================= */
+   DECK CLASS
+========================================================= */
 
-function createImpulse(seconds,decay){
+class Deck {
 
-    const buffer =
-        audioContext.createBuffer(
-            2,
-            audioContext.sampleRate * seconds,
-            audioContext.sampleRate
-        );
+    constructor(name) {
 
-    for(let channel=0;channel<2;channel++){
+        this.name = name;
 
-        const data =
-            buffer.getChannelData(channel);
+        this.media = document.createElement("audio");
 
-        for(let i=0;i<data.length;i++){
-
-            data[i] =
-                (Math.random()*2-1) *
-                Math.pow(
-                    1-i/data.length,
-                    decay
-                );
-        }
-    }
-
-    return buffer;
-}
-
-
-/* =========================================================
-   DECK
-   ========================================================= */
-
-class Deck{
-
-    constructor(id){
-
-        this.id = id;
-
-        this.media =
-            new Audio();
+        this.media.id =
+            "media" + name;
 
         this.media.preload = "auto";
+
+        this.media.crossOrigin = "anonymous";
+
+        this.media.volume = 1;
+
+        document.body.appendChild(this.media);
+
 
         this.file = null;
 
         this.url = null;
 
-        this.analysis = null;
+        this.videoUrl = null;
 
-        this.fx = {
+        this.track = null;
 
-            filter:false,
-            echo:false,
-            flanger:false,
-            reverb:false
+        this.playing = false;
 
-        };
+        this.source = null;
 
-        this.nodes = {};
+        this.inputGain = null;
 
+        this.low = null;
+
+        this.mid = null;
+
+        this.high = null;
+
+        this.filter = null;
+
+        this.channelGain = null;
+
+        this.analyser = null;
+
+        this.delay = null;
+
+        this.delayFeedback = null;
+
+        this.delayWet = null;
+
+        this.flangerDelay = null;
+
+        this.flangerWet = null;
+
+        this.flangerLfo = null;
+
+        this.flangerLfoGain = null;
+
+        this.reverb = null;
+
+        this.reverbWet = null;
+
+        this.filterActive = false;
+
+        this.echoActive = false;
+
+        this.flangerActive = false;
+
+        this.reverbActive = false;
+
+        this.setupEvents();
+
+    }
+
+
+    initAudio() {
+
+        if (this.source) {
+            return;
+        }
+
+
+        const ctx =
+            audioEngine.ctx;
+
+
+        this.source =
+            ctx.createMediaElementSource(
+                this.media
+            );
+
+
+        this.inputGain =
+            ctx.createGain();
+
+
+        this.low =
+            ctx.createBiquadFilter();
+
+        this.low.type =
+            "lowshelf";
+
+        this.low.frequency.value =
+            200;
+
+
+        this.mid =
+            ctx.createBiquadFilter();
+
+        this.mid.type =
+            "peaking";
+
+        this.mid.frequency.value =
+            1000;
+
+        this.mid.Q.value =
+            0.9;
+
+
+        this.high =
+            ctx.createBiquadFilter();
+
+        this.high.type =
+            "highshelf";
+
+        this.high.frequency.value =
+            6000;
+
+
+        this.filter =
+            ctx.createBiquadFilter();
+
+        this.filter.type =
+            "lowpass";
+
+        this.filter.frequency.value =
+            22050;
+
+        this.filter.Q.value =
+            0.7;
+
+
+        this.channelGain =
+            ctx.createGain();
+
+        this.channelGain.gain.value =
+            0;
+
+
+        this.analyser =
+            ctx.createAnalyser();
+
+        this.analyser.fftSize =
+            1024;
+
+        this.analyser.smoothingTimeConstant =
+            0.75;
+
+
+        /* Echo */
+
+        this.delay =
+            ctx.createDelay(1);
+
+        this.delay.delayTime.value =
+            0.28;
+
+
+        this.delayFeedback =
+            ctx.createGain();
+
+        this.delayFeedback.gain.value =
+            0.25;
+
+
+        this.delayWet =
+            ctx.createGain();
+
+        this.delayWet.gain.value =
+            0;
+
+
+        /* Flanger */
+
+        this.flangerDelay =
+            ctx.createDelay(.1);
+
+        this.flangerDelay.delayTime.value =
+            0.004;
+
+
+        this.flangerWet =
+            ctx.createGain();
+
+        this.flangerWet.gain.value =
+            0;
+
+
+        this.flangerLfo =
+            ctx.createOscillator();
+
+        this.flangerLfo.frequency.value =
+            0.25;
+
+
+        this.flangerLfoGain =
+            ctx.createGain();
+
+        this.flangerLfoGain.gain.value =
+            0.003;
+
+
+        this.flangerLfo.connect(
+            this.flangerLfoGain
+        );
+
+        this.flangerLfoGain.connect(
+            this.flangerDelay.delayTime
+        );
+
+
+        /* Reverb */
+
+        this.reverb =
+            ctx.createConvolver();
+
+        this.reverb.buffer =
+            this.createImpulse(
+                ctx,
+                2.2,
+                2
+            );
+
+
+        this.reverbWet =
+            ctx.createGain();
+
+        this.reverbWet.gain.value =
+            0;
+
+
+        /* Main signal */
+
+        this.source.connect(
+            this.inputGain
+        );
+
+        this.inputGain.connect(
+            this.low
+        );
+
+        this.low.connect(
+            this.mid
+        );
+
+        this.mid.connect(
+            this.high
+        );
+
+        this.high.connect(
+            this.filter
+        );
+
+
+        /* Dry */
+
+        this.filter.connect(
+            this.channelGain
+        );
+
+
+        /* Echo */
+
+        this.filter.connect(
+            this.delay
+        );
+
+        this.delay.connect(
+            this.delayFeedback
+        );
+
+        this.delayFeedback.connect(
+            this.delay
+        );
+
+        this.delay.connect(
+            this.delayWet
+        );
+
+        this.delayWet.connect(
+            this.channelGain
+        );
+
+
+        /* Flanger */
+
+        this.filter.connect(
+            this.flangerDelay
+        );
+
+        this.flangerDelay.connect(
+            this.flangerWet
+        );
+
+        this.flangerWet.connect(
+            this.channelGain
+        );
+
+
+        /* Reverb */
+
+        this.filter.connect(
+            this.reverb
+        );
+
+        this.reverb.connect(
+            this.reverbWet
+        );
+
+        this.reverbWet.connect(
+            this.channelGain
+        );
+
+
+        this.channelGain.connect(
+            this.analyser
+        );
+
+        this.analyser.connect(
+            audioEngine.masterGain
+        );
+
+
+        try {
+            this.flangerLfo.start();
+        } catch (_) {}
+
+
+        this.setCrossGain(
+            0.5
+        );
+
+    }
+
+
+    createImpulse(ctx, seconds, decay) {
+
+        const length =
+            ctx.sampleRate * seconds;
+
+        const buffer =
+            ctx.createBuffer(
+                2,
+                length,
+                ctx.sampleRate
+            );
+
+
+        for (
+            let channel = 0;
+            channel < 2;
+            channel++
+        ) {
+
+            const data =
+                buffer.getChannelData(
+                    channel
+                );
+
+            for (
+                let i = 0;
+                i < length;
+                i++
+            ) {
+
+                data[i] =
+                    (
+                        Math.random() * 2 - 1
+                    ) *
+                    Math.pow(
+                        1 - i / length,
+                        decay
+                    );
+
+            }
+
+        }
+
+        return buffer;
+
+    }
+
+
+    setupEvents() {
 
         this.media.addEventListener(
             "loadedmetadata",
             () => {
 
-                $("dur"+this.id)
-                    .textContent =
-                    formatTime(
-                        this.media.duration
-                    );
+                updateDeckDisplay(
+                    this.name
+                );
 
-                this.updateScreen();
+                if (
+                    this.name === state.activeDeck
+                ) {
+
+                    syncCentralVideo();
+
+                }
 
             }
         );
@@ -163,24 +561,25 @@ class Deck{
             "timeupdate",
             () => {
 
-                $("time"+this.id)
-                    .textContent =
-                    formatTime(
-                        this.media.currentTime
-                    );
+                updateDeckDisplay(
+                    this.name
+                );
 
-                this.updateScreen();
+                if (
+                    this.name === state.activeDeck
+                ) {
 
-                this.updateMeter();
+                    syncCentralVideo();
 
-                if(
-                    autoDJ &&
-                    this.id === activeDeck &&
-                    this.media.duration -
-                    this.media.currentTime < 14
-                ){
+                    updateSmartCurrent();
 
-                    prepareAutoDJ();
+                    if (
+                        state.autoDJ
+                    ) {
+
+                        checkAutoDJ();
+
+                    }
 
                 }
 
@@ -192,11 +591,19 @@ class Deck{
             "play",
             () => {
 
-                $("state"+this.id)
-                    .textContent = "PLAY";
+                this.playing = true;
 
-                $("vinyl"+this.id)
-                    .classList.add("spin");
+                updateDeckVisual(
+                    this.name
+                );
+
+                if (
+                    this.name === state.activeDeck
+                ) {
+
+                    playCentralVideo();
+
+                }
 
             }
         );
@@ -206,11 +613,19 @@ class Deck{
             "pause",
             () => {
 
-                $("state"+this.id)
-                    .textContent = "PAUSE";
+                this.playing = false;
 
-                $("vinyl"+this.id)
-                    .classList.remove("spin");
+                updateDeckVisual(
+                    this.name
+                );
+
+                if (
+                    this.name === state.activeDeck
+                ) {
+
+                    pauseCentralVideo();
+
+                }
 
             }
         );
@@ -220,20 +635,35 @@ class Deck{
             "ended",
             () => {
 
-                $("state"+this.id)
-                    .textContent = "END";
+                this.playing = false;
 
-                $("vinyl"+this.id)
-                    .classList.remove("spin");
+                updateDeckVisual(
+                    this.name
+                );
 
-                if(
-                    autoDJ &&
-                    this.id === activeDeck
-                ){
+                if (
+                    state.autoDJ
+                ) {
 
-                    crossfadeToOther();
+                    performAutoTransition(
+                        true
+                    );
 
                 }
+
+            }
+        );
+
+
+        this.media.addEventListener(
+            "error",
+            () => {
+
+                setStatus(
+                    "Error al reproducir " +
+                    this.name,
+                    true
+                );
 
             }
         );
@@ -241,527 +671,276 @@ class Deck{
     }
 
 
-    /* =====================================================
-       CONEXIÓN WEB AUDIO
-       ===================================================== */
+    async play() {
 
-    connect(){
+        if (!this.track) {
 
-        if(this.nodes.source)
+            setStatus(
+                "Carga una canción en Deck " +
+                this.name,
+                true
+            );
+
             return;
 
+        }
 
-        this.nodes.source =
-            audioContext
-                .createMediaElementSource(
-                    this.media
-                );
 
+        await ensureAudioStarted();
 
-        this.nodes.input =
-            audioContext.createGain();
 
+        try {
 
-        this.nodes.low =
-            audioContext.createBiquadFilter();
+            await this.media.play();
 
-        this.nodes.mid =
-            audioContext.createBiquadFilter();
+            setActiveDeck(
+                this.name
+            );
 
-        this.nodes.high =
-            audioContext.createBiquadFilter();
+        } catch (error) {
 
-        this.nodes.filter =
-            audioContext.createBiquadFilter();
+            setStatus(
+                "El navegador bloqueó la reproducción. Pulsa PLAY nuevamente.",
+                true
+            );
 
-        this.nodes.dry =
-            audioContext.createGain();
-
-        this.nodes.channel =
-            audioContext.createGain();
-
-
-        /* ECHO */
-
-        this.nodes.delay =
-            audioContext.createDelay(1);
-
-        this.nodes.feedback =
-            audioContext.createGain();
-
-        this.nodes.echoWet =
-            audioContext.createGain();
-
-
-        /* FLANGER */
-
-        this.nodes.flanger =
-            audioContext.createDelay(.1);
-
-        this.nodes.flangerWet =
-            audioContext.createGain();
-
-        this.nodes.lfo =
-            audioContext.createOscillator();
-
-        this.nodes.lfoGain =
-            audioContext.createGain();
-
-
-        /* REVERB */
-
-        this.nodes.reverb =
-            audioContext.createConvolver();
-
-        this.nodes.reverbWet =
-            audioContext.createGain();
-
-
-        /* ANALIZADOR */
-
-        this.nodes.analyser =
-            audioContext.createAnalyser();
-
-        this.nodes.analyser.fftSize = 256;
-
-
-        /* EQ */
-
-        this.nodes.low.type = "lowshelf";
-
-        this.nodes.low.frequency.value = 180;
-
-
-        this.nodes.mid.type = "peaking";
-
-        this.nodes.mid.frequency.value = 1000;
-
-        this.nodes.mid.Q.value = .8;
-
-
-        this.nodes.high.type = "highshelf";
-
-        this.nodes.high.frequency.value = 6000;
-
-
-        /* FILTER */
-
-        this.nodes.filter.type = "lowpass";
-
-        this.nodes.filter.frequency.value = 22000;
-
-        this.nodes.filter.Q.value = .7;
-
-
-        /* ECHO */
-
-        this.nodes.delay.delayTime.value = .28;
-
-        this.nodes.feedback.gain.value = .34;
-
-        this.nodes.echoWet.gain.value = 0;
-
-
-        /* FLANGER */
-
-        this.nodes.flanger.delayTime.value = .004;
-
-        this.nodes.flangerWet.gain.value = 0;
-
-        this.nodes.lfo.frequency.value = .25;
-
-        this.nodes.lfoGain.gain.value = .002;
-
-
-        /* REVERB */
-
-        this.nodes.reverb.buffer =
-            createImpulse(1.8,2.4);
-
-        this.nodes.reverbWet.gain.value = 0;
-
-
-        /* LFO */
-
-        this.nodes.lfo.connect(
-            this.nodes.lfoGain
-        );
-
-        this.nodes.lfoGain.connect(
-            this.nodes.flanger.delayTime
-        );
-
-        this.nodes.lfo.start();
-
-
-        /* CADENA PRINCIPAL */
-
-        this.nodes.source
-
-            .connect(this.nodes.input)
-
-            .connect(this.nodes.low)
-
-            .connect(this.nodes.mid)
-
-            .connect(this.nodes.high)
-
-            .connect(this.nodes.filter);
-
-
-        this.nodes.filter
-            .connect(this.nodes.dry)
-            .connect(this.nodes.channel);
-
-
-        /* ECHO */
-
-        this.nodes.filter
-            .connect(this.nodes.delay);
-
-        this.nodes.delay
-            .connect(this.nodes.feedback);
-
-        this.nodes.feedback
-            .connect(this.nodes.delay);
-
-        this.nodes.delay
-            .connect(this.nodes.echoWet);
-
-        this.nodes.echoWet
-            .connect(this.nodes.channel);
-
-
-        /* FLANGER */
-
-        this.nodes.filter
-            .connect(this.nodes.flanger);
-
-        this.nodes.flanger
-            .connect(this.nodes.flangerWet);
-
-        this.nodes.flangerWet
-            .connect(this.nodes.channel);
-
-
-        /* REVERB */
-
-        this.nodes.filter
-            .connect(this.nodes.reverb);
-
-        this.nodes.reverb
-            .connect(this.nodes.reverbWet);
-
-        this.nodes.reverbWet
-            .connect(this.nodes.channel);
-
-
-        /* MASTER */
-
-        this.nodes.channel
-
-            .connect(this.nodes.analyser)
-
-            .connect(masterGain);
-
-        this.nodes.input.gain.value = 1;
-
-        this.nodes.dry.gain.value = 1;
+        }
 
     }
 
 
-    /* =====================================================
-       CARGAR
-       ===================================================== */
+    pause() {
 
-    load(file){
+        this.media.pause();
 
-        initAudio();
+    }
+
+
+    stop() {
+
+        this.media.pause();
+
+        try {
+
+            this.media.currentTime = 0;
+
+        } catch (_) {}
+
+    }
+
+
+    loadFile(file, libraryTrack = null) {
+
+        if (!file) {
+            return;
+        }
+
+
+        if (
+            this.url &&
+            this.url.startsWith("blob:")
+        ) {
+
+            try {
+
+                URL.revokeObjectURL(
+                    this.url
+                );
+
+            } catch (_) {}
+
+        }
+
 
         this.file = file;
 
-        if(this.url)
-            URL.revokeObjectURL(this.url);
-
         this.url =
-            URL.createObjectURL(file);
+            URL.createObjectURL(
+                file
+            );
 
-        this.media.src = this.url;
+
+        this.track =
+            libraryTrack ||
+            createTrackFromFile(
+                file
+            );
+
+
+        this.videoUrl =
+            file.type.startsWith("video/")
+                ? this.url
+                : null;
+
+
+        this.media.src =
+            this.url;
 
         this.media.load();
 
 
-        const meta =
-            parseFileName(file.name);
-
-
-        this.analysis = {
-
-            title:meta.title,
-
-            artist:meta.artist,
-
-            genre:meta.genre,
-
-            bpm:null,
-
-            key:null,
-
-            energy:null,
-
-            duration:null
-
-        };
-
-
-        $("title"+this.id)
-            .textContent =
-            meta.title;
-
-
-        $("meta"+this.id)
-            .textContent =
-            (meta.artist || "HC PRO")
-            + " • "
-            + file.name;
-
-
-        $("state"+this.id)
-            .textContent =
-            "READY";
-
-
-        setVisualDeck(this.id);
-
-        updateSmartDisplay(
-            this.analysis
+        updateDeckDisplay(
+            this.name
         );
 
 
-        analyzeFile(
-            file,
-            this
+        if (
+            this.name ===
+            state.activeDeck
+        ) {
+
+            showTrackOnScreen(
+                this.track,
+                this.videoUrl
+            );
+
+        }
+
+
+        setStatus(
+            "Cargado en Deck " +
+            this.name,
+            false
         );
 
     }
 
 
-    /* =====================================================
-       PLAY
-       ===================================================== */
+    setGain(db) {
 
-    play(){
-
-        initAudio();
-
-        audioContext.resume();
-
-        this.media
-            .play()
-            .catch(()=>{});
-
-        activeDeck = this.id;
-
-        setVisualDeck(this.id);
-
-    }
-
-
-    pause(){
-
-        this.media.pause();
-
-    }
-
-
-    stop(){
-
-        this.media.pause();
-
-        this.media.currentTime = 0;
-
-    }
-
-
-    /* =====================================================
-       CONTROLES
-       ===================================================== */
-
-    setControl(type,value){
-
-        if(!this.nodes.input)
+        if (!this.inputGain) {
             return;
+        }
 
-
-        if(type === "gain")
-            this.nodes.input.gain.value =
-                Number(value);
-
-
-        if(type === "low")
-            this.nodes.low.gain.value =
-                Number(value);
-
-
-        if(type === "mid")
-            this.nodes.mid.gain.value =
-                Number(value);
-
-
-        if(type === "high")
-            this.nodes.high.gain.value =
-                Number(value);
-
-
-        if(type === "pitch")
-            this.media.playbackRate =
-                Number(value);
+        this.inputGain.gain.value =
+            dbToGain(
+                Number(db)
+            );
 
     }
 
 
-    /* =====================================================
-       FX
-       ===================================================== */
+    setPitch(rate) {
 
-    toggleFX(type){
-
-        if(!this.nodes.input)
-            return;
-
-
-        this.fx[type] =
-            !this.fx[type];
-
-
-        const enabled =
-            this.fx[type];
-
-
-        if(type === "filter"){
-
-            this.nodes.filter
-                .frequency
-                .setTargetAtTime(
-                    enabled ? 850 : 22000,
-                    audioContext.currentTime,
-                    .06
-                );
-
-        }
-
-
-        if(type === "echo"){
-
-            this.nodes.echoWet
-                .gain
-                .setTargetAtTime(
-                    enabled ? .28 : 0,
-                    audioContext.currentTime,
-                    .05
-                );
-
-        }
-
-
-        if(type === "flanger"){
-
-            this.nodes.flangerWet
-                .gain
-                .setTargetAtTime(
-                    enabled ? .18 : 0,
-                    audioContext.currentTime,
-                    .05
-                );
-
-        }
-
-
-        if(type === "reverb"){
-
-            this.nodes.reverbWet
-                .gain
-                .setTargetAtTime(
-                    enabled ? .22 : 0,
-                    audioContext.currentTime,
-                    .05
-                );
-
-        }
+        this.media.playbackRate =
+            Number(rate);
 
     }
 
 
-    /* =====================================================
-       VU
-       ===================================================== */
+    setEQ(type, value) {
 
-    updateMeter(){
-
-        if(!this.nodes.analyser)
+        if (!this[type]) {
             return;
+        }
+
+        this[type].gain.value =
+            Number(value);
+
+    }
 
 
-        const data =
-            new Uint8Array(
-                this.nodes.analyser.frequencyBinCount
+    setCrossGain(fader) {
+
+        if (!this.channelGain) {
+            return;
+        }
+
+
+        const position =
+            clamp(
+                Number(fader),
+                0,
+                1
             );
 
 
-        this.nodes.analyser
-            .getByteFrequencyData(data);
+        if (this.name === "A") {
 
+            this.channelGain.gain.value =
+                Math.cos(
+                    position *
+                    Math.PI /
+                    2
+                );
 
-        let average = 0;
+        } else {
 
+            this.channelGain.gain.value =
+                Math.sin(
+                    position *
+                    Math.PI /
+                    2
+                );
 
-        for(const value of data)
-            average += value;
-
-
-        average /=
-            data.length * 255;
-
-
-        $("meter"+this.id)
-            .style.height =
-            Math.max(
-                2,
-                average * 100
-            ) + "%";
+        }
 
     }
 
 
-    /* =====================================================
-       PANTALLA
-       ===================================================== */
+    toggleEffect(type) {
 
-    updateScreen(){
+        if (type === "filter") {
 
-        if(this.id !== activeDeck)
-            return;
+            this.filterActive =
+                !this.filterActive;
+
+            this.filter.frequency.value =
+                this.filterActive
+                    ? 850
+                    : 22050;
+
+            return this.filterActive;
+
+        }
 
 
-        $("screenTitle")
-            .textContent =
-            this.analysis?.title ||
-            this.file?.name ||
-            "HC PRO DJ HUMBERTO";
+        if (type === "echo") {
+
+            this.echoActive =
+                !this.echoActive;
+
+            this.delayWet.gain.value =
+                this.echoActive
+                    ? .38
+                    : 0;
+
+            return this.echoActive;
+
+        }
 
 
-        $("screenTime")
-            .textContent =
-            formatTime(
-                this.media.currentTime
-            )
-            +
-            " / "
-            +
-            formatTime(
-                this.media.duration
-            );
+        if (type === "flanger") {
+
+            this.flangerActive =
+                !this.flangerActive;
+
+            this.flangerWet.gain.value =
+                this.flangerActive
+                    ? .28
+                    : 0;
+
+            return this.flangerActive;
+
+        }
+
+
+        if (type === "reverb") {
+
+            this.reverbActive =
+                !this.reverbActive;
+
+            this.reverbWet.gain.value =
+                this.reverbActive
+                    ? .28
+                    : 0;
+
+            return this.reverbActive;
+
+        }
+
+
+        return false;
 
     }
 
@@ -769,367 +948,2045 @@ class Deck{
 
 
 /* =========================================================
-   DECKS
-   ========================================================= */
+   INITIALIZE AUDIO
+========================================================= */
 
-const decks = {
+async function ensureAudioStarted() {
 
-    A:new Deck("A"),
+    if (
+        audioEngine.initialized
+    ) {
 
-    B:new Deck("B")
+        if (
+            audioEngine.ctx.state ===
+            "suspended"
+        ) {
 
-};
+            await audioEngine.ctx.resume();
 
+        }
 
-/* =========================================================
-   INICIALIZAR AUDIO
-   ========================================================= */
-
-function initAudio(){
-
-    if(audioContext)
         return;
 
-
-    audioContext =
-        new (
-            window.AudioContext ||
-            window.webkitAudioContext
-        )();
+    }
 
 
-    masterGain =
-        audioContext.createGain();
+    const AudioContextClass =
+        window.AudioContext ||
+        window.webkitAudioContext;
 
 
-    masterGain.gain.value =
-        .85;
+    if (!AudioContextClass) {
 
-
-    masterAnalyser =
-        audioContext.createAnalyser();
-
-
-    masterAnalyser.fftSize =
-        512;
-
-
-    recordDestination =
-        audioContext
-            .createMediaStreamDestination();
-
-
-    masterGain
-        .connect(masterAnalyser);
-
-
-    masterAnalyser
-        .connect(
-            audioContext.destination
+        setStatus(
+            "Este navegador no soporta Web Audio.",
+            true
         );
 
-
-    masterAnalyser
-        .connect(
-            recordDestination
-        );
-
-
-    decks.A.connect();
-
-    decks.B.connect();
-
-
-    $("audioStatus")
-        .textContent =
-        "AUDIO ONLINE";
-
-
-    startVisualizer();
-
-}
-
-
-/* =========================================================
-   NOMBRE DE ARCHIVO
-   ========================================================= */
-
-function parseFileName(filename){
-
-    let name =
-        filename.replace(
-            /\.[^/.]+$/,
-            ""
-        );
-
-
-    let artist = "";
-
-    let title = name;
-
-
-    if(name.includes(" - ")){
-
-        const parts =
-            name.split(" - ");
-
-        artist =
-            parts.shift();
-
-        title =
-            parts.join(" - ");
+        return;
 
     }
 
 
-    let genre = "General";
+    audioEngine.ctx =
+        new AudioContextClass();
 
-    const lower =
-        name.toLowerCase();
 
+    audioEngine.masterGain =
+        audioEngine.ctx.createGain();
 
-    const genres = [
 
-        "rock",
-        "pop",
-        "cumbia",
-        "electronic",
-        "house",
-        "reggaeton",
-        "cuarteto",
-        "folklore",
-        "dance",
-        "techno"
-
-    ];
-
-
-    for(const g of genres){
-
-        if(lower.includes(g)){
-
-            genre = g;
-
-            break;
-
-        }
-
-    }
-
-
-    return {
-
-        artist:artist.trim(),
-
-        title:title.trim(),
-
-        genre
-
-    };
-
-}
-
-
-/* =========================================================
-   ANALISIS DE ARCHIVO
-   ========================================================= */
-
-async function analyzeFile(file,deck){
-
-    try{
-
-        $("smartState")
-            .textContent =
-            "ANALYZING";
-
-
-        const analysisContext =
-            new (
-                window.AudioContext ||
-                window.webkitAudioContext
-            )();
-
-
-        const arrayBuffer =
-            await file.arrayBuffer();
-
-
-        const buffer =
-            await analysisContext
-                .decodeAudioData(
-                    arrayBuffer
-                );
-
-
-        const bpm =
-            estimateBPM(buffer);
-
-
-        const energy =
-            estimateEnergy(buffer);
-
-
-        const key =
-            estimateKey(buffer);
-
-
-        deck.analysis = {
-
-            ...deck.analysis,
-
-            bpm,
-
-            energy,
-
-            key,
-
-            duration:
-                buffer.duration
-
-        };
-
-
-        addToLibrary(deck);
-
-
-        if(deck.id === activeDeck){
-
-            updateSmartDisplay(
-                deck.analysis
-            );
-
-        }
-
-
-        $("smartState")
-            .textContent =
-            "READY";
-
-
-        analysisContext.close();
-
-    }
-
-    catch(error){
-
-        console.warn(
-            "No se pudo analizar:",
-            error
-        );
-
-        $("smartState")
-            .textContent =
-            "READY";
-
-    }
-
-}
-
-
-/* =========================================================
-   ENERGY
-   ========================================================= */
-
-function estimateEnergy(buffer){
-
-    const channel =
-        buffer.getChannelData(0);
-
-
-    const sampleRate =
-        buffer.sampleRate;
-
-
-    const step =
-        Math.max(
-            1,
-            Math.floor(
-                sampleRate * .05
-            )
+    audioEngine.masterGain.gain.value =
+        Number(
+            $("masterVolume").value
         );
 
 
-    let total = 0;
-
-    let count = 0;
-
-
-    for(
-        let i=0;
-        i<channel.length;
-        i+=step
-    ){
-
-        let power = 0;
-
-        const size =
-            Math.min(
-                step,
-                channel.length-i
-            );
+    audioEngine.analyser =
+        audioEngine.ctx.createAnalyser();
 
 
-        for(
-            let j=0;
-            j<size;
-            j++
-        ){
+    audioEngine.analyser.fftSize =
+        2048;
 
-            power +=
-                channel[i+j] *
-                channel[i+j];
-
-        }
+    audioEngine.analyser.smoothingTimeConstant =
+        .8;
 
 
-        total +=
-            Math.sqrt(
-                power / size
-            );
+    audioEngine.recordDestination =
+        audioEngine.ctx.createMediaStreamDestination();
 
 
-        count++;
+    audioEngine.masterGain.connect(
+        audioEngine.analyser
+    );
 
-    }
+
+    audioEngine.analyser.connect(
+        audioEngine.ctx.destination
+    );
 
 
-    return Math.round(
-        clamp(
-            (total/count)*190,
-            0,
-            100
-        )
+    audioEngine.masterGain.connect(
+        audioEngine.recordDestination
+    );
+
+
+    audioEngine.micGain =
+        audioEngine.ctx.createGain();
+
+    audioEngine.micGain.gain.value =
+        .8;
+
+
+    audioEngine.decks.A =
+        new Deck("A");
+
+    audioEngine.decks.B =
+        new Deck("B");
+
+
+    audioEngine.decks.A.initAudio();
+    audioEngine.decks.B.initAudio();
+
+
+    await audioEngine.ctx.resume();
+
+
+    audioEngine.initialized =
+        true;
+
+
+    updateCrossfader();
+
+
+    setStatus(
+        "AUDIO ENGINE ACTIVO",
+        false
     );
 
 }
 
 
 /* =========================================================
-   BPM
-   ========================================================= */
+   START SYSTEM
+========================================================= */
 
-function estimateBPM(buffer){
+async function startSystem() {
 
-    const sampleRate =
-        buffer.sampleRate;
+    try {
 
-
-    const channel =
-        buffer.getChannelData(0);
+        $("bootStatus").textContent =
+            "INICIANDO AUDIO ENGINE...";
 
 
-    const seconds =
-        Math.min(
-            75,
-            buffer.duration
+        await ensureAudioStarted();
+
+
+        state.started = true;
+
+
+        $("bootOverlay").style.display =
+            "none";
+
+
+        $("app").classList.add(
+            "started"
         );
+
+
+        $("footerStatus").textContent =
+            "AUDIO ENGINE ONLINE";
+
+
+        setStatus(
+            "SISTEMA ONLINE",
+            false
+        );
+
+
+        startVisualizer();
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        $("bootStatus").textContent =
+            "ERROR: " +
+            error.message;
+
+        setStatus(
+            "Error de inicialización",
+            true
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+function setStatus(message, error = false) {
+
+    const system =
+        $("systemStatus");
+
+    if (system) {
+
+        system.textContent =
+            message;
+
+        system.style.color =
+            error
+                ? "var(--red)"
+                : "var(--green)";
+
+    }
+
+
+    const mixer =
+        $("mixerMessage");
+
+    if (mixer) {
+
+        mixer.textContent =
+            message;
+
+    }
+
+
+    const screen =
+        $("screenStatus");
+
+    if (screen) {
+
+        screen.textContent =
+            error
+                ? "ERROR"
+                : "ONLINE";
+
+    }
+
+}
+
+
+/* =========================================================
+   ACTIVE DECK
+========================================================= */
+
+function setActiveDeck(name) {
+
+    state.activeDeck =
+        name;
+
+
+    const deck =
+        audioEngine.decks[name];
+
+    if (!deck) {
+        return;
+    }
+
+
+    $("screenDeck").textContent =
+        "DECK " + name;
+
+
+    if (deck.track) {
+
+        showTrackOnScreen(
+            deck.track,
+            deck.videoUrl
+        );
+
+    }
+
+
+    updateSmartCurrent();
+
+
+    const other =
+        name === "A"
+            ? "B"
+            : "A";
+
+
+    const otherDeck =
+        audioEngine.decks[other];
+
+
+    if (
+        otherDeck &&
+        !otherDeck.playing
+    ) {
+
+        setCrossfader(
+            name === "A"
+                ? 0
+                : 1
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   FILE LOADING
+========================================================= */
+
+function openDeckFile(name) {
+
+    const input =
+        $("file" + name);
+
+    if (input) {
+
+        input.value = "";
+
+        input.click();
+
+    }
+
+}
+
+
+function loadDeckInput(name, file) {
+
+    if (!file) {
+        return;
+    }
+
+
+    const deck =
+        audioEngine.decks[name];
+
+    if (!deck) {
+        return;
+    }
+
+
+    const existing =
+        findTrackByFile(
+            file
+        );
+
+
+    deck.loadFile(
+        file,
+        existing
+    );
+
+
+    if (
+        existing
+    ) {
+
+        state.currentTrack =
+            existing;
+
+    }
+
+
+    setActiveDeck(
+        name
+    );
+
+}
+
+
+/* =========================================================
+   CENTRAL VIDEO
+========================================================= */
+
+function showTrackOnScreen(
+    track,
+    videoUrl
+) {
+
+    const video =
+        $("videoPlayer");
+
+    const placeholder =
+        $("screenPlaceholder");
+
+    const title =
+        $("screenTrack");
+
+
+    if (!video) {
+        return;
+    }
+
+
+    title.textContent =
+        track?.title ||
+        "NO TRACK";
+
+
+    if (videoUrl) {
+
+        video.src =
+            videoUrl;
+
+        video.style.display =
+            "block";
+
+        placeholder.style.display =
+            "none";
+
+        video.load();
+
+    } else {
+
+        video.pause();
+
+        video.removeAttribute(
+            "src"
+        );
+
+        video.load();
+
+        video.style.display =
+            "none";
+
+        placeholder.style.display =
+            "flex";
+
+    }
+
+}
+
+
+function playCentralVideo() {
+
+    const deck =
+        audioEngine.decks[
+            state.activeDeck
+        ];
+
+
+    const video =
+        $("videoPlayer");
+
+
+    if (
+        !deck ||
+        !deck.videoUrl
+    ) {
+
+        return;
+
+    }
+
+
+    video.playbackRate =
+        deck.media.playbackRate;
+
+
+    try {
+
+        if (
+            Math.abs(
+                video.currentTime -
+                deck.media.currentTime
+            ) > .4
+        ) {
+
+            video.currentTime =
+                deck.media.currentTime;
+
+        }
+
+        video.play();
+
+    } catch (_) {}
+
+}
+
+
+function pauseCentralVideo() {
+
+    const video =
+        $("videoPlayer");
+
+    if (video) {
+
+        video.pause();
+
+    }
+
+}
+
+
+function stopCentralVideo() {
+
+    const video =
+        $("videoPlayer");
+
+    if (!video) {
+        return;
+    }
+
+
+    video.pause();
+
+    try {
+
+        video.currentTime =
+            0;
+
+    } catch (_) {}
+
+}
+
+
+function syncCentralVideo() {
+
+    const deck =
+        audioEngine.decks[
+            state.activeDeck
+        ];
+
+    const video =
+        $("videoPlayer");
+
+
+    if (
+        !deck ||
+        !video ||
+        !deck.videoUrl
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        Math.abs(
+            video.currentTime -
+            deck.media.currentTime
+        ) > .35
+    ) {
+
+        try {
+
+            video.currentTime =
+                deck.media.currentTime;
+
+        } catch (_) {}
+
+    }
+
+
+    video.playbackRate =
+        deck.media.playbackRate;
+
+}
+
+
+/* =========================================================
+   DECK DISPLAY
+========================================================= */
+
+function updateDeckDisplay(name) {
+
+    const deck =
+        audioEngine.decks[name];
+
+    if (!deck) {
+        return;
+    }
+
+
+    const prefix =
+        name.toLowerCase();
+
+
+    $(prefix + "Title").textContent =
+        deck.track?.title ||
+        "SIN CANCIÓN";
+
+
+    const duration =
+        deck.media.duration;
+
+
+    $(prefix + "Time").textContent =
+        formatTime(
+            deck.media.currentTime
+        );
+
+
+    $(prefix + "Duration").textContent =
+        formatTime(
+            duration
+        );
+
+
+    if (
+        Number.isFinite(duration) &&
+        duration > 0
+    ) {
+
+        $(
+            prefix + "Progress"
+        ).value =
+            (
+                deck.media.currentTime /
+                duration
+            ) *
+            100;
+
+    } else {
+
+        $(
+            prefix + "Progress"
+        ).value =
+            0;
+
+    }
+
+
+    const indicator =
+        $(prefix + "Indicator");
+
+
+    if (indicator) {
+
+        indicator.textContent =
+            deck.playing
+                ? "PLAYING"
+                : deck.track
+                    ? "LOADED"
+                    : "READY";
+
+        indicator.style.color =
+            deck.playing
+                ? "var(--green)"
+                : "var(--muted)";
+
+    }
+
+
+    $(prefix + "Bpm").textContent =
+        deck.track?.bpm
+            ? Math.round(
+                deck.track.bpm
+            )
+            : "---";
+
+
+    $(prefix + "Key").textContent =
+        deck.track?.key ||
+        "---";
+
+
+    $(prefix + "Energy").textContent =
+        deck.track?.energy != null
+            ? Math.round(
+                deck.track.energy
+            )
+            : "---";
+
+
+    updateDeckVisual(
+        name
+    );
+
+}
+
+
+function updateDeckVisual(name) {
+
+    const deck =
+        audioEngine.decks[name];
+
+    const vinyl =
+        $("vinyl" + name);
+
+    if (!deck || !vinyl) {
+        return;
+    }
+
+
+    vinyl.classList.toggle(
+        "spinning",
+        deck.playing
+    );
+
+}
+
+
+/* =========================================================
+   DECK BUTTONS
+========================================================= */
+
+function setupDeckControls(name) {
+
+    const prefix =
+        name.toLowerCase();
+
+
+    $("aLoad" === prefix + "Load"
+        ? "aLoad"
+        : "bLoad");
+
+
+    $(prefix + "Load")
+        .addEventListener(
+            "click",
+            () => openDeckFile(name)
+        );
+
+
+    $(prefix + "Play")
+        .addEventListener(
+            "click",
+            () =>
+                audioEngine.decks[name].play()
+        );
+
+
+    $(prefix + "Pause")
+        .addEventListener(
+            "click",
+            () =>
+                audioEngine.decks[name].pause()
+        );
+
+
+    $(prefix + "Stop")
+        .addEventListener(
+            "click",
+            () => {
+
+                audioEngine.decks[name].stop();
+
+                if (
+                    name === state.activeDeck
+                ) {
+
+                    stopCentralVideo();
+
+                }
+
+            }
+        );
+
+
+    $(prefix + "Progress")
+        .addEventListener(
+            "input",
+            event => {
+
+                const deck =
+                    audioEngine.decks[name];
+
+                if (
+                    !deck ||
+                    !Number.isFinite(
+                        deck.media.duration
+                    )
+                ) {
+
+                    return;
+
+                }
+
+
+                deck.media.currentTime =
+                    (
+                        Number(
+                            event.target.value
+                        ) / 100
+                    ) *
+                    deck.media.duration;
+
+            }
+        );
+
+
+    $(prefix + "Gain")
+        .addEventListener(
+            "input",
+            event => {
+
+                const value =
+                    Number(
+                        event.target.value
+                    );
+
+                audioEngine.decks[name]
+                    .setGain(value);
+
+                $(prefix + "GainValue")
+                    .textContent =
+                    value.toFixed(1) +
+                    " dB";
+
+            }
+        );
+
+
+    $(prefix + "Pitch")
+        .addEventListener(
+            "input",
+            event => {
+
+                const value =
+                    Number(
+                        event.target.value
+                    );
+
+                audioEngine.decks[name]
+                    .setPitch(value);
+
+                $(prefix + "PitchValue")
+                    .textContent =
+                    value.toFixed(2) +
+                    "x";
+
+            }
+        );
+
+
+    ["Low","Mid","High"].forEach(
+        band => {
+
+            $(prefix + band)
+                .addEventListener(
+                    "input",
+                    event => {
+
+                        const value =
+                            Number(
+                                event.target.value
+                            );
+
+                        const node =
+                            band.toLowerCase();
+
+                        audioEngine
+                            .decks[name]
+                            .setEQ(
+                                node,
+                                value
+                            );
+
+                        $(prefix + band + "Value")
+                            .textContent =
+                            value.toFixed(1);
+
+                    }
+                );
+
+        }
+    );
+
+
+    ["Filter","Echo","Flanger","Reverb"]
+        .forEach(
+            effect => {
+
+                $(prefix + effect)
+                    .addEventListener(
+                        "click",
+                        event => {
+
+                            const active =
+                                audioEngine
+                                    .decks[name]
+                                    .toggleEffect(
+                                        effect.toLowerCase()
+                                    );
+
+                            event.currentTarget
+                                .classList.toggle(
+                                    "active",
+                                    active
+                                );
+
+                        }
+                    );
+
+            }
+        );
+
+}
+
+
+/* =========================================================
+   MIXER
+========================================================= */
+
+function setCrossfader(value) {
+
+    const fader =
+        clamp(
+            Number(value),
+            0,
+            1
+        );
+
+
+    $("crossfader").value =
+        fader;
+
+
+    updateCrossfader();
+
+}
+
+
+function updateCrossfader() {
+
+    if (
+        !audioEngine.decks.A ||
+        !audioEngine.decks.B
+    ) {
+
+        return;
+
+    }
+
+
+    const value =
+        Number(
+            $("crossfader").value
+        );
+
+
+    audioEngine.decks.A
+        .setCrossGain(
+            value
+        );
+
+    audioEngine.decks.B
+        .setCrossGain(
+            value
+        );
+
+
+    let label;
+
+    if (value < .47) {
+
+        label = "A";
+
+    } else if (value > .53) {
+
+        label = "B";
+
+    } else {
+
+        label = "CENTER";
+
+    }
+
+
+    $("crossValue").textContent =
+        label;
+
+}
+
+
+/* =========================================================
+   AUTO DJ
+========================================================= */
+
+function toggleAutoDJ() {
+
+    state.autoDJ =
+        !state.autoDJ;
+
+
+    const button =
+        $("autoDJBtn");
+
+
+    button.classList.toggle(
+        "active",
+        state.autoDJ
+    );
+
+
+    button.querySelector(
+        "small"
+    ).textContent =
+        state.autoDJ
+            ? "ON"
+            : "OFF";
+
+
+    if (
+        state.autoDJ
+    ) {
+
+        setStatus(
+            "AUTO DJ ACTIVADO",
+            false
+        );
+
+
+        prepareNextTrack();
+
+    } else {
+
+        setStatus(
+            "AUTO DJ DESACTIVADO",
+            false
+        );
+
+    }
+
+}
+
+
+function getActiveDeck() {
+
+    return audioEngine.decks[
+        state.activeDeck
+    ];
+
+}
+
+
+function getInactiveDeck() {
+
+    return audioEngine.decks[
+        state.activeDeck === "A"
+            ? "B"
+            : "A"
+    ];
+
+}
+
+
+function checkAutoDJ() {
+
+    if (
+        !state.autoDJ ||
+        state.transitioning
+    ) {
+
+        return;
+
+    }
+
+
+    const deck =
+        getActiveDeck();
+
+
+    if (
+        !deck ||
+        !deck.track ||
+        !Number.isFinite(
+            deck.media.duration
+        )
+    ) {
+
+        return;
+
+    }
+
+
+    const remaining =
+        deck.media.duration -
+        deck.media.currentTime;
+
+
+    if (
+        remaining <=
+        state.transitionSeconds
+    ) {
+
+        performAutoTransition();
+
+    }
+
+}
+
+
+async function prepareNextTrack() {
+
+    const inactive =
+        getInactiveDeck();
+
+
+    if (
+        !inactive ||
+        inactive.playing
+    ) {
+
+        return;
+
+    }
+
+
+    const current =
+        getActiveDeck()?.track;
+
+
+    const next =
+        chooseBestNext(
+            current
+        );
+
+
+    if (!next) {
+
+        setStatus(
+            "No hay siguiente canción compatible.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    inactive.loadFile(
+        next.file,
+        next
+    );
+
+
+    if (
+        current &&
+        current.bpm &&
+        next.bpm
+    ) {
+
+        const ratio =
+            current.bpm /
+            next.bpm;
+
+
+        const safeRate =
+            clamp(
+                ratio,
+                .92,
+                1.08
+            );
+
+
+        const prefix =
+            inactive.name.toLowerCase();
+
+
+        inactive.media.playbackRate =
+            safeRate;
+
+
+        $(
+            prefix + "Pitch"
+        ).value =
+            safeRate;
+
+
+        $(
+            prefix + "PitchValue"
+        ).textContent =
+            safeRate.toFixed(2) +
+            "x";
+
+    }
+
+
+    state.nextPrepared =
+        true;
+
+
+    setStatus(
+        "Siguiente preparada: " +
+        next.title,
+        false
+    );
+
+}
+
+
+async function performAutoTransition(force = false) {
+
+    if (
+        state.transitioning
+    ) {
+
+        return;
+
+    }
+
+
+    const current =
+        getActiveDeck();
+
+    const next =
+        getInactiveDeck();
+
+
+    if (
+        !current ||
+        !next ||
+        !next.track
+    ) {
+
+        if (!force) {
+            await prepareNextTrack();
+        }
+
+        return;
+
+    }
+
+
+    state.transitioning =
+        true;
+
+
+    try {
+
+        await ensureAudioStarted();
+
+
+        const startValue =
+            state.activeDeck === "A"
+                ? 0
+                : 1;
+
+
+        const endValue =
+            state.activeDeck === "A"
+                ? 1
+                : 0;
+
+
+        setCrossfader(
+            startValue
+        );
+
+
+        await next.play();
+
+
+        const duration =
+            state.transitionMode === "fade"
+                ? 5000
+                : 8000;
+
+
+        if (
+            state.transitionMode ===
+            "echo"
+        ) {
+
+            next.toggleEffect(
+                "echo"
+            );
+
+        }
+
+
+        if (
+            state.transitionMode ===
+            "filter"
+        ) {
+
+            current.filter.frequency.value =
+                1200;
+
+        }
+
+
+        const startTime =
+            performance.now();
+
+
+        await new Promise(
+            resolve => {
+
+                function animate(now) {
+
+                    const progress =
+                        clamp(
+                            (
+                                now -
+                                startTime
+                            ) / duration,
+                            0,
+                            1
+                        );
+
+
+                    const eased =
+                        progress *
+                        progress *
+                        (
+                            3 -
+                            2 *
+                            progress
+                        );
+
+
+                    const value =
+                        startValue +
+                        (
+                            endValue -
+                            startValue
+                        ) *
+                        eased;
+
+
+                    setCrossfader(
+                        value
+                    );
+
+
+                    if (
+                        progress < 1
+                    ) {
+
+                        requestAnimationFrame(
+                            animate
+                        );
+
+                    } else {
+
+                        resolve();
+
+                    }
+
+                }
+
+
+                requestAnimationFrame(
+                    animate
+                );
+
+            }
+        );
+
+
+        if (
+            state.transitionMode ===
+            "filter"
+        ) {
+
+            current.filter.frequency.value =
+                22050;
+
+        }
+
+
+        current.stop();
+
+
+        state.activeDeck =
+            next.name;
+
+
+        state.currentTrack =
+            next.track;
+
+
+        state.nextPrepared =
+            false;
+
+
+        setActiveDeck(
+            next.name
+        );
+
+
+        setCrossfader(
+            next.name === "A"
+                ? 0
+                : 1
+        );
+
+
+        pushHistory(
+            next.track
+        );
+
+
+        await prepareNextTrack();
+
+
+    } catch (error) {
+
+        console.error(
+            "Auto DJ:",
+            error
+        );
+
+        setStatus(
+            "Error durante Auto DJ",
+            true
+        );
+
+    }
+
+
+    state.transitioning =
+        false;
+
+}
+
+
+/* =========================================================
+   LIBRARY
+========================================================= */
+
+function createTrackFromFile(file) {
+
+    const parsed =
+        parseFileName(
+            file.name
+        );
+
+
+    return {
+
+        id:
+            "track_" +
+            Date.now() +
+            "_" +
+            Math.random()
+                .toString(36)
+                .slice(2),
+
+        file,
+
+        title:
+            parsed.title,
+
+        artist:
+            parsed.artist,
+
+        genre:
+            "General",
+
+        bpm:
+            null,
+
+        key:
+            null,
+
+        energy:
+            null,
+
+        duration:
+            null,
+
+        analyzed:
+            false
+
+    };
+
+}
+
+
+function parseFileName(filename) {
+
+    const clean =
+        filename.replace(
+            /\.[^/.]+$/,
+            ""
+        );
+
+
+    const parts =
+        clean.split(
+            " - "
+        );
+
+
+    if (
+        parts.length >= 2
+    ) {
+
+        return {
+
+            artist:
+                parts.shift().trim(),
+
+            title:
+                parts.join(" - ")
+                    .trim()
+
+        };
+
+    }
+
+
+    return {
+
+        artist:
+            "HC PRO",
+
+        title:
+            clean.trim()
+
+    };
+
+}
+
+
+function findTrackByFile(file) {
+
+    return state.library.find(
+        track =>
+            track.file === file
+    ) || null;
+
+}
+
+
+function addFilesToLibrary(files) {
+
+    const valid =
+        Array.from(files || [])
+            .filter(
+                file =>
+                    file.type.startsWith(
+                        "audio/"
+                    ) ||
+                    file.type.startsWith(
+                        "video/"
+                    )
+            );
+
+
+    let added = 0;
+
+
+    for (const file of valid) {
+
+        if (
+            findTrackByFile(file)
+        ) {
+
+            continue;
+
+        }
+
+
+        state.library.push(
+            createTrackFromFile(
+                file
+            )
+        );
+
+        added++;
+
+    }
+
+
+    renderLibrary();
+
+
+    saveLibraryMetadata();
+
+
+    setStatus(
+        added +
+        " archivo(s) agregados a la biblioteca.",
+        false
+    );
+
+}
+
+
+function renderLibrary() {
+
+    const body =
+        $("libraryBody");
+
+
+    if (
+        !state.library.length
+    ) {
+
+        body.innerHTML =
+            '<div class="library-empty">' +
+            'No hay canciones cargadas.' +
+            '</div>';
+
+        return;
+
+    }
+
+
+    body.innerHTML =
+        state.library.map(
+            track => `
+
+                <div
+                    class="library-row"
+                    data-id="${safeText(track.id)}"
+                >
+
+                    <div
+                        class="library-title"
+                        title="${safeText(track.title)}"
+                    >
+                        ${safeText(track.artist)}
+                        -
+                        ${safeText(track.title)}
+                    </div>
+
+                    <div class="library-data">
+                        ${
+                            track.bpm
+                                ? Math.round(track.bpm)
+                                : "---"
+                        }
+                    </div>
+
+                    <div class="library-data">
+                        ${
+                            track.key ||
+                            "---"
+                        }
+                    </div>
+
+                    <div class="library-data">
+                        ${
+                            track.energy != null
+                                ? Math.round(track.energy)
+                                : "---"
+                        }
+                    </div>
+
+                    <div class="library-actions">
+
+                        <button
+                            data-action="a"
+                            data-id="${safeText(track.id)}">
+                            A
+                        </button>
+
+                        <button
+                            data-action="b"
+                            data-id="${safeText(track.id)}">
+                            B
+                        </button>
+
+                        <button
+                            data-action="analyze"
+                            data-id="${safeText(track.id)}">
+                            🔎
+                        </button>
+
+                    </div>
+
+                </div>
+            `
+        ).join("");
+
+}
+
+
+/* =========================================================
+   LIBRARY ACTIONS
+========================================================= */
+
+function findTrackById(id) {
+
+    return state.library.find(
+        track =>
+            track.id === id
+    );
+
+}
+
+
+async function handleLibraryAction(
+    action,
+    id
+) {
+
+    const track =
+        findTrackById(id);
+
+
+    if (!track) {
+        return;
+    }
+
+
+    if (
+        action === "a"
+    ) {
+
+        audioEngine.decks.A
+            .loadFile(
+                track.file,
+                track
+            );
+
+        setActiveDeck("A");
+
+        return;
+
+    }
+
+
+    if (
+        action === "b"
+    ) {
+
+        audioEngine.decks.B
+            .loadFile(
+                track.file,
+                track
+            );
+
+        setActiveDeck("B");
+
+        return;
+
+    }
+
+
+    if (
+        action === "analyze"
+    ) {
+
+        await analyzeTrack(
+            track
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   ANALYSIS
+========================================================= */
+
+async function analyzeTrack(track) {
+
+    if (
+        !track ||
+        !track.file
+    ) {
+
+        return;
+
+    }
+
+
+    setStatus(
+        "Analizando: " +
+        track.title,
+        false
+    );
+
+
+    try {
+
+        const buffer =
+            await track.file.arrayBuffer();
+
+
+        const decoded =
+            await audioEngine.ctx
+                .decodeAudioData(
+                    buffer.slice(0)
+                );
+
+
+        track.duration =
+            decoded.duration;
+
+
+        const samples =
+            getMonoSamples(
+                decoded,
+                60000
+            );
+
+
+        track.energy =
+            estimateEnergy(
+                samples
+            );
+
+
+        track.bpm =
+            estimateBPM(
+                samples,
+                decoded.sampleRate
+            );
+
+
+        track.key =
+            estimateKey(
+                decoded
+            );
+
+
+        track.analyzed =
+            true;
+
+
+        renderLibrary();
+
+        updateDeckTrackIfNeeded(
+            track
+        );
+
+
+        saveLibraryMetadata();
+
+
+        setStatus(
+            "Analizado: " +
+            track.title,
+            false
+        );
+
+
+        return track;
+
+    } catch (error) {
+
+        console.error(
+            "Analysis error:",
+            error
+        );
+
+
+        setStatus(
+            "No se pudo analizar " +
+            track.title,
+            true
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   MONO SAMPLES
+========================================================= */
+
+function getMonoSamples(
+    buffer,
+    maxMilliseconds
+) {
+
+    const channelCount =
+        buffer.numberOfChannels;
+
+
+    const maxSamples =
+        Math.min(
+            buffer.length,
+            Math.floor(
+                buffer.sampleRate *
+                maxMilliseconds /
+                1000
+            )
+        );
+
+
+    const result =
+        new Float32Array(
+            maxSamples
+        );
+
+
+    for (
+        let channel = 0;
+        channel < channelCount;
+        channel++
+    ) {
+
+        const data =
+            buffer.getChannelData(
+                channel
+            );
+
+
+        for (
+            let i = 0;
+            i < maxSamples;
+            i++
+        ) {
+
+            result[i] +=
+                data[i] /
+                channelCount;
+
+        }
+
+    }
+
+
+    return result;
+
+}
+
+
+/* =========================================================
+   ENERGY
+========================================================= */
+
+function estimateEnergy(samples) {
+
+    if (
+        !samples ||
+        !samples.length
+    ) {
+
+        return 0;
+
+    }
 
 
     const step =
         Math.max(
             1,
             Math.floor(
-                sampleRate * .02
+                samples.length /
+                50000
+            )
+        );
+
+
+    let sum = 0;
+
+    let count = 0;
+
+
+    for (
+        let i = 0;
+        i < samples.length;
+        i += step
+    ) {
+
+        sum +=
+            samples[i] *
+            samples[i];
+
+        count++;
+
+    }
+
+
+    const rms =
+        Math.sqrt(
+            sum /
+            Math.max(
+                1,
+                count
+            )
+        );
+
+
+    return clamp(
+        rms * 300,
+        0,
+        100
+    );
+
+}
+
+
+/* =========================================================
+   BPM ESTIMATOR
+   Rough browser estimate
+========================================================= */
+
+function estimateBPM(
+    samples,
+    sampleRate
+) {
+
+    if (
+        !samples ||
+        samples.length < 10000
+    ) {
+
+        return null;
+
+    }
+
+
+    const targetRate =
+        22050;
+
+
+    const ratio =
+        sampleRate /
+        targetRate;
+
+
+    const step =
+        Math.max(
+            1,
+            Math.round(
+                ratio
+            )
+        );
+
+
+    const reducedLength =
+        Math.floor(
+            samples.length /
+            step
+        );
+
+
+    const reduced =
+        new Float32Array(
+            reducedLength
+        );
+
+
+    for (
+        let i = 0;
+        i < reducedLength;
+        i++
+    ) {
+
+        reduced[i] =
+            samples[i * step];
+
+    }
+
+
+    const envelopeRate =
+        100;
+
+
+    const hop =
+        Math.max(
+            1,
+            Math.floor(
+                targetRate /
+                envelopeRate
+            )
+        );
+
+
+    const frame =
+        Math.max(
+            1,
+            Math.floor(
+                hop *
+                .5
             )
         );
 
@@ -1137,234 +2994,193 @@ function estimateBPM(buffer){
     const envelope = [];
 
 
-    for(
-        let i=0;
-        i<seconds*sampleRate;
-        i+=step
-    ){
+    for (
+        let i = 0;
+        i + frame < reduced.length;
+        i += hop
+    ) {
 
-        let total = 0;
+        let sum = 0;
 
-        const size =
-            Math.min(
-                step,
-                channel.length-i
-            );
-
-
-        for(
-            let j=0;
-            j<size;
+        for (
+            let j = 0;
+            j < frame;
             j++
-        ){
+        ) {
 
-            total +=
-                Math.abs(
-                    channel[i+j]
-                );
+            const value =
+                reduced[i + j] || 0;
+
+            sum +=
+                value *
+                value;
 
         }
 
 
         envelope.push(
-            total/size
+            Math.sqrt(
+                sum /
+                frame
+            )
         );
 
     }
 
 
-    const average =
-        envelope.reduce(
-            (a,b)=>a+b,
-            0
-        ) /
-        envelope.length;
+    if (
+        envelope.length < 100
+    ) {
 
-
-    for(let i=0;i<envelope.length;i++){
-
-        envelope[i] =
-            Math.max(
-                0,
-                envelope[i]-average
-            );
+        return null;
 
     }
 
 
-    let bestBPM = 120;
+    const diff = [];
 
-    let bestScore = -Infinity;
+    for (
+        let i = 1;
+        i < envelope.length;
+        i++
+    ) {
+
+        diff.push(
+            Math.max(
+                0,
+                envelope[i] -
+                envelope[i - 1]
+            )
+        );
+
+    }
 
 
-    for(
-        let bpm=70;
-        bpm<=160;
-        bpm++
-    ){
+    let bestBpm =
+        120;
 
-        const lag =
-            Math.round(
+    let bestScore =
+        -Infinity;
+
+
+    for (
+        let bpm = 70;
+        bpm <= 180;
+        bpm += 1
+    ) {
+
+        const period =
+            (
                 60 /
-                bpm /
-                (step/sampleRate)
-            );
+                bpm
+            ) *
+            envelopeRate;
 
 
         let score = 0;
 
 
-        for(
-            let i=lag;
-            i<envelope.length;
+        for (
+            let i = 0;
+            i < diff.length - period;
             i++
-        ){
+        ) {
+
+            const index =
+                Math.round(
+                    i + period
+                );
+
 
             score +=
-                envelope[i] *
-                envelope[i-lag];
+                diff[i] *
+                (
+                    diff[index] || 0
+                );
 
         }
 
 
-        if(score > bestScore){
+        if (
+            score >
+            bestScore
+        ) {
 
-            bestScore = score;
+            bestScore =
+                score;
 
-            bestBPM = bpm;
+            bestBpm =
+                bpm;
 
         }
 
     }
 
 
-    return bestBPM;
+    return clamp(
+        bestBpm,
+        70,
+        180
+    );
 
 }
 
 
 /* =========================================================
-   KEY ESTIMADA
-   ========================================================= */
+   KEY ESTIMATOR
+   Rough spectral estimate
+========================================================= */
 
-function estimateKey(buffer){
-
-    const channel =
-        buffer.getChannelData(0);
-
+function estimateKey(buffer) {
 
     const sampleRate =
         buffer.sampleRate;
 
 
-    const N = 2048;
+    const channel =
+        buffer.getChannelData(
+            0
+        );
 
 
-    const start =
+    const size =
+        4096;
+
+
+    let start =
+        Math.floor(
+            (
+                buffer.length -
+                size
+            ) *
+            .5
+        );
+
+
+    start =
         Math.max(
             0,
-            Math.floor(
-                channel.length*.35
-            )
+            start
         );
 
 
     const samples =
         channel.slice(
             start,
-            start+N
+            start + size
         );
 
 
-    const chroma =
-        new Array(12)
-            .fill(0);
+    if (
+        samples.length < size
+    ) {
 
-
-    for(
-        let k=1;
-        k<N/2;
-        k++
-    ){
-
-        let real=0;
-
-        let imag=0;
-
-
-        for(
-            let n=0;
-            n<samples.length;
-            n++
-        ){
-
-            const window =
-                .5 -
-                .5 *
-                Math.cos(
-                    2*Math.PI*n/
-                    (N-1)
-                );
-
-
-            const angle =
-                2*Math.PI*k*n/N;
-
-
-            real +=
-                samples[n] *
-                window *
-                Math.cos(angle);
-
-
-            imag -=
-                samples[n] *
-                window *
-                Math.sin(angle);
-
-        }
-
-
-        const magnitude =
-            Math.sqrt(
-                real*real +
-                imag*imag
-            );
-
-
-        const frequency =
-            k*sampleRate/N;
-
-
-        if(
-            frequency < 70 ||
-            frequency > 1800
-        )
-            continue;
-
-
-        const midi =
-            Math.round(
-                69 +
-                12 *
-                Math.log2(
-                    frequency/440
-                )
-            );
-
-
-        const pitchClass =
-            ((midi % 12)+12)%12;
-
-
-        chroma[pitchClass] +=
-            magnitude;
+        return null;
 
     }
 
 
-    const names = [
-
+    const noteNames = [
         "C",
         "C#",
         "D",
@@ -1377,618 +3193,499 @@ function estimateKey(buffer){
         "A",
         "A#",
         "B"
-
     ];
 
 
-    let strongest = 0;
+    const pitchClassEnergy =
+        new Array(12).fill(0);
 
 
-    for(
-        let i=1;
-        i<12;
+    /*
+      Rough Goertzel scan.
+      This is intentionally labeled as
+      an estimate, not professional key detection.
+    */
+
+    for (
+        let midi = 40;
+        midi <= 84;
+        midi++
+    ) {
+
+        const frequency =
+            440 *
+            Math.pow(
+                2,
+                (
+                    midi -
+                    69
+                ) /
+                12
+            );
+
+
+        if (
+            frequency >
+            sampleRate / 2
+        ) {
+
+            continue;
+
+        }
+
+
+        const power =
+            goertzelPower(
+                samples,
+                sampleRate,
+                frequency
+            );
+
+
+        const pc =
+            (
+                midi %
+                12 +
+                12
+            ) %
+            12;
+
+
+        pitchClassEnergy[pc] +=
+            power;
+
+    }
+
+
+    let best =
+        0;
+
+
+    for (
+        let i = 1;
+        i < 12;
         i++
-    ){
+    ) {
 
-        if(
-            chroma[i] >
-            chroma[strongest]
-        ){
+        if (
+            pitchClassEnergy[i] >
+            pitchClassEnergy[best]
+        ) {
 
-            strongest = i;
+            best =
+                i;
 
         }
 
     }
 
 
-    return names[strongest];
+    return (
+        noteNames[best] +
+        " (est.)"
+    );
 
 }
 
 
-/* =========================================================
-   BIBLIOTECA
-   ========================================================= */
+function goertzelPower(
+    samples,
+    sampleRate,
+    frequency
+) {
 
-function addToLibrary(deck){
+    const omega =
+        2 *
+        Math.PI *
+        frequency /
+        sampleRate;
 
-    if(!deck.file)
-        return;
 
-
-    const exists =
-        library.find(
-            item =>
-            item.file === deck.file
+    const coefficient =
+        2 *
+        Math.cos(
+            omega
         );
 
 
-    if(exists)
-        return;
+    let q1 = 0;
+
+    let q2 = 0;
 
 
-    library.push({
-
-        id:
-            crypto.randomUUID
-            ?
-            crypto.randomUUID()
-            :
-            String(
-                Date.now()+
-                Math.random()
-            ),
-
-        file:deck.file,
-
-        analysis:
-            deck.analysis,
-
-        plays:0,
-
-        lastPlayed:0
-
-    });
+    const length =
+        samples.length;
 
 
-    renderLibrary();
+    for (
+        let i = 0;
+        i < length;
+        i++
+    ) {
+
+        const q0 =
+            coefficient *
+            q1 -
+            q2 +
+            samples[i];
+
+        q2 =
+            q1;
+
+        q1 =
+            q0;
+
+    }
+
+
+    return (
+        q1 * q1 +
+        q2 * q2 -
+        coefficient *
+        q1 *
+        q2
+    );
 
 }
 
 
 /* =========================================================
-   IMPORTAR
-   ========================================================= */
+   UPDATE DECK TRACK
+========================================================= */
 
-async function importFiles(files){
+function updateDeckTrackIfNeeded(track) {
 
-    initAudio();
+    for (
+        const name of ["A","B"]
+    ) {
 
-    for(const file of files){
+        const deck =
+            audioEngine.decks[name];
 
-        const meta =
-            parseFileName(
-                file.name
+
+        if (
+            deck &&
+            deck.track === track
+        ) {
+
+            updateDeckDisplay(
+                name
             );
 
+        }
 
-        let analysis = {
+    }
 
-            ...meta,
 
-            bpm:null,
+    updateSmartCurrent();
 
-            key:null,
+}
 
-            energy:null,
 
-            duration:null
+/* =========================================================
+   SMART CURRENT
+========================================================= */
+
+function updateSmartCurrent() {
+
+    const deck =
+        getActiveDeck();
+
+
+    const track =
+        deck?.track;
+
+
+    $("smartCurrentTrack")
+        .textContent =
+        track
+            ? track.title
+            : "Sin canción";
+
+
+    $("smartCurrentBpm")
+        .textContent =
+        track?.bpm
+            ? Math.round(
+                track.bpm
+            )
+            : "---";
+
+
+    $("smartCurrentKey")
+        .textContent =
+        track?.key ||
+        "---";
+
+
+    $("smartCurrentEnergy")
+        .textContent =
+        track?.energy != null
+            ? Math.round(
+                track.energy
+            )
+            : "---";
+
+}
+
+
+/* =========================================================
+   COMPATIBILITY
+========================================================= */
+
+function bpmCompatibility(
+    a,
+    b
+) {
+
+    if (
+        !a ||
+        !b
+    ) {
+
+        return 50;
+
+    }
+
+
+    let x =
+        Number(a);
+
+    let y =
+        Number(b);
+
+
+    if (
+        !x ||
+        !y
+    ) {
+
+        return 50;
+
+    }
+
+
+    while (
+        y < x * .75
+    ) {
+
+        y *= 2;
+
+    }
+
+
+    while (
+        y > x * 1.5
+    ) {
+
+        y /= 2;
+
+    }
+
+
+    const difference =
+        Math.abs(
+            x - y
+        ) /
+        x;
+
+
+    return clamp(
+        100 -
+        difference *
+        300,
+        0,
+        100
+    );
+
+}
+
+
+function keyCompatibility(
+    a,
+    b
+) {
+
+    if (
+        !a ||
+        !b
+    ) {
+
+        return 50;
+
+    }
+
+
+    const parse =
+        value =>
+            String(value)
+                .charAt(0) ===
+                "C"
+                ? null
+                : null;
+
+
+    const notes = [
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "E",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "A",
+        "A#",
+        "B"
+    ];
+
+
+    const getIndex =
+        value => {
+
+            const clean =
+                String(value)
+                    .replace(
+                        " (est.)",
+                        ""
+                    );
+
+
+            return notes.indexOf(
+                clean
+            );
 
         };
 
 
-        try{
-
-            const context =
-                new (
-                    window.AudioContext ||
-                    window.webkitAudioContext
-                )();
+    const ia =
+        getIndex(a);
 
 
-            const buffer =
-                await context.decodeAudioData(
-                    await file.arrayBuffer()
-                );
+    const ib =
+        getIndex(b);
 
 
-            analysis.bpm =
-                estimateBPM(buffer);
+    if (
+        ia < 0 ||
+        ib < 0
+    ) {
 
-
-            analysis.energy =
-                estimateEnergy(buffer);
-
-
-            analysis.key =
-                estimateKey(buffer);
-
-
-            analysis.duration =
-                buffer.duration;
-
-
-            context.close();
-
-        }
-
-        catch(error){
-
-            console.warn(
-                "No se pudo analizar:",
-                file.name
-            );
-
-        }
-
-
-        library.push({
-
-            id:
-                crypto.randomUUID
-                ?
-                crypto.randomUUID()
-                :
-                String(
-                    Date.now()+
-                    Math.random()
-                ),
-
-            file,
-
-            analysis,
-
-            plays:0,
-
-            lastPlayed:0
-
-        });
+        return 50;
 
     }
 
 
-    renderLibrary();
-
-}
-
-
-/* =========================================================
-   MOSTRAR BIBLIOTECA
-   ========================================================= */
-
-function renderLibrary(){
-
-    const search =
-        $("searchInput")
-            .value
-            .toLowerCase();
-
-
-    const filtered =
-        library.filter(item => {
-
-            const text =
-                (
-                    item.file.name +
-                    " " +
-                    item.analysis.title +
-                    " " +
-                    item.analysis.artist
-                )
-                .toLowerCase();
-
-
-            return text.includes(search);
-
-        });
-
-
-    $("libraryCount")
-        .textContent =
-        library.length +
-        " TRACKS";
-
-
-    $("libraryList")
-        .innerHTML =
-        filtered.map(
-            (item,index) => `
-
-            <div class="track">
-
-                <span class="num">
-                    ${String(index+1).padStart(2,"0")}
-                </span>
-
-                <div>
-
-                    <b>
-                        ${
-                            escapeHTML(
-                                item.analysis.artist
-                            )
-                        }
-
-                        ${
-                            item.analysis.artist
-                            ? " — "
-                            : ""
-                        }
-
-                        ${
-                            escapeHTML(
-                                item.analysis.title
-                            )
-                        }
-                    </b>
-
-                    <small>
-                        ${
-                            escapeHTML(
-                                item.file.name
-                            )
-                        }
-                    </small>
-
-                </div>
-
-                <span class="badge">
-
-                    ${item.analysis.bpm || "--"}
-                    BPM
-
-                    •
-                    ${item.analysis.key || "--"}
-
-                    • E
-                    ${item.analysis.energy ?? "--"}
-
-                </span>
-
-
-                <button
-                    onclick="
-                    window.HCPRO.loadTrack(
-                        '${item.id}',
-                        'A'
-                    )">
-
-                    A
-
-                </button>
-
-
-                <button
-                    onclick="
-                    window.HCPRO.loadTrack(
-                        '${item.id}',
-                        'B'
-                    )">
-
-                    B
-
-                </button>
-
-            </div>
-
-        `
-        )
-        .join("");
-
-
-    if(!filtered.length){
-
-        $("libraryList")
-            .innerHTML = `
-                <div class="result">
-                    Biblioteca vacía.
-                    Agrega música para comenzar.
-                </div>
-            `;
-
-    }
-
-}
-
-
-/* =========================================================
-   ESCAPE HTML
-   ========================================================= */
-
-function escapeHTML(text){
-
-    return String(text || "")
-        .replace(
-            /[&<>"']/g,
-            character => ({
-
-                "&":"&amp;",
-                "<":"&lt;",
-                ">":"&gt;",
-                '"':"&quot;",
-                "'":"&#039;"
-
-            })[character]
-        );
-
-}
-
-
-/* =========================================================
-   CARGAR PISTA
-   ========================================================= */
-
-function loadTrack(id,deckID){
-
-    const item =
-        library.find(
-            x => x.id === id
-        );
-
-
-    if(!item)
-        return;
-
-
-    decks[deckID]
-        .load(
-            item.file
-        );
-
-
-    decks[deckID]
-        .analysis =
-        item.analysis;
-
-
-    setVisualDeck(deckID);
-
-    updateSmartDisplay(
-        item.analysis
-    );
-
-}
-
-
-/* =========================================================
-   PANTALLA ACTIVA
-   ========================================================= */
-
-function setVisualDeck(id){
-
-    activeDeck = id;
-
-    $("visualDeck")
-        .textContent =
-        "DECK " + id;
-
-
-    decks[id]
-        .updateScreen();
-
-}
-
-
-/* =========================================================
-   SMART DISPLAY
-   ========================================================= */
-
-function updateSmartDisplay(analysis){
-
-    $("smartBpm")
-        .textContent =
-        analysis?.bpm || "--";
-
-
-    $("smartKey")
-        .textContent =
-        analysis?.key || "--";
-
-
-    $("smartEnergy")
-        .textContent =
-        analysis?.energy ?? "--";
-
-}
-
-
-/* =========================================================
-   COMPATIBILIDAD BPM
-   ========================================================= */
-
-function bpmCompatibility(a,b){
-
-    if(!a || !b)
-        return 45;
-
-
-    let difference =
-        Math.abs(a-b);
-
-
-    const ratio =
-        b/a;
-
-
-    if(
-        ratio>.48 &&
-        ratio<.55
-    ){
-
-        difference =
+    const diff =
+        Math.min(
             Math.abs(
-                a -
-                b*2
-            );
-
-    }
-
-
-    if(
-        ratio>1.8 &&
-        ratio<2.05
-    ){
-
-        difference =
+                ia - ib
+            ),
+            12 -
             Math.abs(
-                a*2 -
-                b
-            );
-
-    }
+                ia - ib
+            )
+        );
 
 
-    return clamp(
-        100 -
-        difference*5,
-        0,
-        100
-    );
-
-}
-
-
-/* =========================================================
-   COMPATIBILIDAD KEY
-   ========================================================= */
-
-function keyCompatibility(a,b){
-
-    if(!a || !b)
-        return 45;
-
-
-    if(a===b)
-        return 100;
-
-
-    const keys = [
-
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B"
-
+    const scores = [
+        100,
+        88,
+        75,
+        62,
+        52,
+        65,
+        25
     ];
 
 
-    const x =
-        keys.indexOf(a);
-
-    const y =
-        keys.indexOf(b);
-
-
-    if(
-        x<0 ||
-        y<0
-    )
-        return 45;
-
-
-    const distance =
+    return scores[
         Math.min(
-            (x-y+12)%12,
-            (y-x+12)%12
-        );
-
-
-    if(distance===1)
-        return 88;
-
-    if(distance===2)
-        return 70;
-
-    if(distance===3)
-        return 52;
-
-    if(distance===6)
-        return 45;
-
-
-    return 25;
+            diff,
+            6
+        )
+    ];
 
 }
 
 
-/* =========================================================
-   ENERGY
-   ========================================================= */
+function energyCompatibility(
+    a,
+    b,
+    mode
+) {
 
-function energyCompatibility(a,b,mode){
-
-    if(
-        a == null ||
-        b == null
-    )
-        return 45;
-
-
-    const difference =
-        b-a;
-
-
-    if(mode==="build"){
-
-        if(difference>=0)
-            return clamp(
-                100 -
-                difference*4,
-                40,
-                100
-            );
-
-
-        return clamp(
-            70 +
-            difference*8,
-            0,
-            70
+    const ea =
+        Number(
+            a
         );
 
+    const eb =
+        Number(
+            b
+        );
+
+
+    if (
+        !Number.isFinite(ea) ||
+        !Number.isFinite(eb)
+    ) {
+
+        return 50;
+
     }
 
 
-    if(mode==="peak"){
+    const diff =
+        Math.abs(
+            ea -
+            eb
+        );
 
-        return b>=75
-            ? 90
-            : 55;
+
+    let score =
+        clamp(
+            100 -
+            diff *
+            1.2,
+            0,
+            100
+        );
+
+
+    if (
+        mode === "BUILD" &&
+        eb >= ea
+    ) {
+
+        score += 15;
 
     }
 
 
-    if(mode==="chill"){
+    if (
+        mode === "CHILL" &&
+        eb <= ea
+    ) {
 
-        return b<=a+5
-            ? 90
-            : 40;
+        score += 15;
+
+    }
+
+
+    if (
+        mode === "PEAK" &&
+        eb >= 70
+    ) {
+
+        score += 15;
 
     }
 
 
     return clamp(
-        100 -
-        Math.abs(difference)*5,
+        score,
         0,
         100
     );
@@ -1996,823 +3693,551 @@ function energyCompatibility(a,b,mode){
 }
 
 
-/* =========================================================
-   COMPATIBILIDAD TOTAL
-   ========================================================= */
+function compatibility(
+    current,
+    candidate
+) {
 
-function calculateCompatibility(
-    from,
-    to
-){
+    if (
+        !current ||
+        !candidate
+    ) {
+
+        return 0;
+
+    }
+
 
     const mode =
-        $("energyMode").value;
+        $("smartMode").value;
 
 
     const bpm =
         bpmCompatibility(
-            from.bpm,
-            to.bpm
+            current.bpm,
+            candidate.bpm
         );
 
 
     const key =
         keyCompatibility(
-            from.key,
-            to.key
+            current.key,
+            candidate.key
         );
 
 
     const energy =
         energyCompatibility(
-            from.energy,
-            to.energy,
+            current.energy,
+            candidate.energy,
             mode
         );
 
 
-    return Math.round(
-
-        bpm*.40 +
-        key*.35 +
-        energy*.25
-
+    return (
+        bpm * .40 +
+        key * .35 +
+        energy * .25
     );
 
 }
 
 
 /* =========================================================
-   BUSCAR SIGUIENTE
-   ========================================================= */
+   CHOOSE BEST NEXT
+========================================================= */
 
-function findBestNext(){
+function chooseBestNext(
+    current
+) {
 
-    const current =
-        decks[activeDeck]
-            .analysis || {};
+    const candidates =
+        state.library.filter(
+            track => {
+
+                if (
+                    !track ||
+                    track === current
+                ) {
+
+                    return false;
+
+                }
 
 
-    const recent =
-        new Set(
-            playHistory.slice(-12)
+                if (
+                    state.history
+                        .slice(-5)
+                        .includes(
+                            track.id
+                        )
+                ) {
+
+                    return false;
+
+                }
+
+
+                return true;
+
+            }
         );
 
 
-    return library
+    if (
+        !candidates.length
+    ) {
 
-        .filter(item => {
+        return (
+            state.library.find(
+                track =>
+                    track !== current
+            ) ||
+            null
+        );
 
-            if(!item.file)
-                return false;
-
-
-            if(
-                decks[activeDeck].file &&
-                item.file.name ===
-                decks[activeDeck].file.name
-            )
-                return false;
-
-
-            if(
-                recent.has(
-                    item.file.name
-                )
-            )
-                return false;
+    }
 
 
-            return true;
+    if (!current) {
 
-        })
+        return candidates[0];
 
-        .map(item => ({
+    }
 
-            ...item,
 
-            score:
-                calculateCompatibility(
-                    current,
-                    item.analysis
-                )
-
-        }))
-
+    return candidates
+        .map(
+            track => ({
+                track,
+                score:
+                    compatibility(
+                        current,
+                        track
+                    )
+            })
+        )
         .sort(
             (a,b) =>
-            b.score-a.score
-        );
+                b.score -
+                a.score
+        )[0]
+        ?.track ||
+        null;
 
 }
 
 
 /* =========================================================
-   MOSTRAR CANDIDATOS
-   ========================================================= */
+   SMART SEARCH
+========================================================= */
 
-function showBestCandidates(){
+function findBestNext() {
 
-    const candidates =
-        findBestNext()
-            .slice(0,5);
-
-
-    $("smartResults")
-        .innerHTML =
-        candidates
-            .map(
-                item => `
-
-                <div class="result">
-
-                    <span>
-                        ${
-                            escapeHTML(
-                                item.analysis.title
-                            )
-                        }
-                    </span>
-
-                    <b>
-                        ${item.score}%
-                    </b>
-
-                    <button
-                        onclick="
-                        window.HCPRO.loadTrack(
-                            '${item.id}',
-                            '${activeDeck==="A"?"B":"A"}'
-                        )">
-
-                        PREPARAR
-
-                    </button>
-
-                </div>
-
-                `
-            )
-            .join("");
+    const current =
+        getActiveDeck()?.track;
 
 
-    if(!candidates.length){
+    if (!current) {
 
-        $("smartResults")
-            .innerHTML = `
-                <div class="result">
-                    Agrega más canciones
-                    a la biblioteca.
-                </div>
-            `;
+        setStatus(
+            "Carga una canción actual primero.",
+            true
+        );
 
-        return [];
+        return;
 
     }
 
 
-    $("smartMatch")
-        .textContent =
-        candidates[0].score +
-        "%";
+    if (
+        !state.library.length
+    ) {
+
+        setStatus(
+            "Importa canciones a la biblioteca.",
+            true
+        );
+
+        return;
+
+    }
 
 
-    return candidates;
+    const results =
+        state.library
+            .filter(
+                track =>
+                    track !== current
+            )
+            .map(
+                track => ({
+                    track,
+                    score:
+                        compatibility(
+                            current,
+                            track
+                        )
+                })
+            )
+            .sort(
+                (a,b) =>
+                    b.score -
+                    a.score
+            )
+            .slice(
+                0,
+                10
+            );
+
+
+    state.smartResults =
+        results;
+
+
+    renderSmartResults(
+        results
+    );
+
+
+    setStatus(
+        "Búsqueda Smart DJ completada.",
+        false
+    );
+
+}
+
+
+function renderSmartResults(
+    results
+) {
+
+    const container =
+        $("smartResults");
+
+
+    if (
+        !results.length
+    ) {
+
+        container.innerHTML =
+            '<div class="empty-smart">' +
+            'No se encontraron canciones.' +
+            '</div>';
+
+        return;
+
+    }
+
+
+    container.innerHTML =
+        results.map(
+            item => {
+
+                const track =
+                    item.track;
+
+
+                return `
+
+                    <div class="smart-result">
+
+                        <div
+                            class="smart-result-title"
+                            title="${safeText(track.title)}"
+                        >
+                            ${safeText(track.artist)}
+                            -
+                            ${safeText(track.title)}
+                        </div>
+
+                        <div class="smart-mini">
+                            BPM:
+                            ${
+                                track.bpm
+                                    ? Math.round(track.bpm)
+                                    : "---"
+                            }
+                        </div>
+
+                        <div class="smart-mini">
+                            ${
+                                track.key ||
+                                "---"
+                            }
+                        </div>
+
+                        <div class="smart-score">
+                            ${Math.round(item.score)}%
+                        </div>
+
+                        <button
+                            class="smart-load"
+                            data-smart-id="${safeText(track.id)}"
+                        >
+                            CARGAR B
+                        </button>
+
+                    </div>
+
+                `;
+
+            }
+        ).join("");
 
 }
 
 
 /* =========================================================
    SMART PLAYLIST
-   ========================================================= */
+========================================================= */
 
-function generateSmartPlaylist(){
+function createSmartPlaylist() {
 
-    smartQueue.length = 0;
-
-
-    let pool =
-        findBestNext();
+    const current =
+        getActiveDeck()?.track;
 
 
-    let current =
-        decks[activeDeck]
-            .analysis || {};
+    if (
+        !current
+    ) {
 
-
-    for(
-        let i=0;
-        i<Math.min(15,pool.length);
-        i++
-    ){
-
-        pool =
-            pool.filter(
-                item =>
-                !smartQueue.includes(item)
-            );
-
-
-        if(!pool.length)
-            break;
-
-
-        pool.sort(
-            (a,b) =>
-            calculateCompatibility(
-                current,
-                b.analysis
-            )
-            -
-            calculateCompatibility(
-                current,
-                a.analysis
-            )
+        setStatus(
+            "Carga una canción para crear la playlist.",
+            true
         );
 
-
-        const next =
-            pool.shift();
-
-
-        next.score =
-            calculateCompatibility(
-                current,
-                next.analysis
-            );
-
-
-        smartQueue.push(
-            next
-        );
-
-
-        current =
-            next.analysis;
+        return;
 
     }
 
 
+    const available =
+        state.library.filter(
+            track =>
+                track !== current
+        );
+
+
+    const queue = [];
+
+    let base =
+        current;
+
+
+    const used =
+        new Set([
+            current.id
+        ]);
+
+
+    for (
+        let i = 0;
+        i < Math.min(
+            12,
+            available.length
+        );
+        i++
+    ) {
+
+        const candidates =
+            available.filter(
+                track =>
+                    !used.has(
+                        track.id
+                    )
+            );
+
+
+        if (
+            !candidates.length
+        ) {
+
+            break;
+
+        }
+
+
+        const next =
+            candidates
+                .map(
+                    track => ({
+                        track,
+                        score:
+                            compatibility(
+                                base,
+                                track
+                            )
+                    })
+                )
+                .sort(
+                    (a,b) =>
+                        b.score -
+                        a.score
+                )[0];
+
+
+        if (!next) {
+            break;
+        }
+
+
+        queue.push(
+            next.track
+        );
+
+
+        used.add(
+            next.track.id
+        );
+
+
+        base =
+            next.track;
+
+    }
+
+
+    state.smartQueue =
+        queue;
+
+
     renderQueue();
+
+
+    setStatus(
+        "Playlist Smart creada: " +
+        queue.length +
+        " canciones.",
+        false
+    );
 
 }
 
 
-/* =========================================================
-   QUEUE
-   ========================================================= */
+function renderQueue() {
 
-function renderQueue(){
-
-    $("queueCount")
-        .textContent =
-        smartQueue.length;
+    const container =
+        $("smartQueue");
 
 
-    $("queueList")
-        .innerHTML =
-        smartQueue
+    if (
+        !state.smartQueue.length
+    ) {
+
+        container.innerHTML =
+            "<span>Sin cola inteligente.</span>";
+
+        return;
+
+    }
+
+
+    container.innerHTML =
+        state.smartQueue
             .map(
-                (item,index) => `
+                (track, index) => `
 
-                <div class="queue-item">
+                    <div class="queue-item">
 
-                    <span>
-                        ${index+1}.
-                        ${
-                            escapeHTML(
-                                item.analysis.title
-                            )
-                        }
-                    </span>
+                        ${index + 1}.
+                        ${safeText(track.title)}
 
-                    <b>
-                        ${item.score || "--"}%
-                    </b>
-
-                </div>
+                    </div>
 
                 `
             )
             .join("");
 
-
-    if(!smartQueue.length){
-
-        $("queueList")
-            .innerHTML = `
-                <div class="queue-item">
-                    Sin pistas en cola.
-                </div>
-            `;
-
-    }
-
 }
 
 
 /* =========================================================
-   PREPARAR AUTO DJ
-   ========================================================= */
+   LOAD SMART RESULT
+========================================================= */
 
-function prepareAutoDJ(){
+function loadSmartToB(id) {
 
-    if(!autoDJ)
-        return;
-
-
-    const inactiveDeck =
-        activeDeck === "A"
-            ? "B"
-            : "A";
-
-
-    if(
-        decks[inactiveDeck].file &&
-        decks[inactiveDeck]
-            .media.readyState >= 2
-    ){
-
-        return;
-
-    }
-
-
-    let next =
-        smartQueue.shift();
-
-
-    if(!next){
-
-        next =
-            findBestNext()[0];
-
-    }
-
-
-    if(!next)
-        return;
-
-
-    decks[inactiveDeck]
-        .load(
-            next.file
+    const track =
+        findTrackById(
+            id
         );
 
 
-    if(
-        decks[activeDeck].analysis?.bpm &&
-        next.analysis?.bpm
-    ){
-
-        const speed =
-            clamp(
-                decks[activeDeck]
-                    .analysis.bpm /
-                next.analysis.bpm,
-                .92,
-                1.08
-            );
-
-
-        decks[inactiveDeck]
-            .media
-            .playbackRate =
-            speed;
-
-    }
-
-
-    renderQueue();
-
-
-    clearTimeout(autoTimer);
-
-
-    const remaining =
-        decks[activeDeck]
-            .media.duration -
-        decks[activeDeck]
-            .media.currentTime;
-
-
-    autoTimer =
-        setTimeout(
-            () => {
-
-                if(autoDJ)
-                    crossfadeToOther();
-
-            },
-            Math.max(
-                3000,
-                (remaining-8)*1000
-            )
-        );
-
-}
-
-
-/* =========================================================
-   CROSSFADE
-   ========================================================= */
-
-function crossfadeToOther(){
-
-    const from =
-        activeDeck;
-
-
-    const to =
-        activeDeck === "A"
-            ? "B"
-            : "A";
-
-
-    if(!decks[to].file){
-
-        prepareAutoDJ();
-
+    if (!track) {
         return;
-
     }
 
 
-    const transition =
-        $("transition").value;
-
-
-    decks[to].play();
-
-
-    setVisualDeck(to);
-
-
-    const start =
-        performance.now();
-
-
-    const duration =
-        transition === "fade"
-            ? 4000
-            : 6500;
-
-
-    function animate(time){
-
-        const progress =
-            clamp(
-                (time-start)/
-                duration,
-                0,
-                1
-            );
-
-
-        const a =
-            Math.cos(
-                progress *
-                Math.PI/2
-            );
-
-
-        const b =
-            Math.sin(
-                progress *
-                Math.PI/2
-            );
-
-
-        setDeckVolume(
-            from,
-            a
+    audioEngine.decks.B
+        .loadFile(
+            track.file,
+            track
         );
 
 
-        setDeckVolume(
-            to,
-            b
-        );
-
-
-        if(progress < 1){
-
-            requestAnimationFrame(
-                animate
-            );
-
-        }
-
-        else{
-
-            decks[from].pause();
-
-            activeDeck = to;
-
-            markPlayed(
-                decks[to].file
-            );
-
-
-            prepareAutoDJ();
-
-        }
-
-    }
-
-
-    requestAnimationFrame(
-        animate
+    setStatus(
+        "Smart DJ preparó Deck B.",
+        false
     );
 
 }
 
 
 /* =========================================================
-   VOLUMEN DECK
-   ========================================================= */
+   MIC
+========================================================= */
 
-function setDeckVolume(
-    deckID,
-    volume
-){
+async function toggleMic() {
 
-    if(
-        decks[deckID]
-            .nodes
-            .channel
-    ){
+    if (
+        !audioEngine.initialized
+    ) {
 
-        decks[deckID]
-            .nodes
-            .channel
-            .gain.value =
-            volume;
-
-    }
-
-}
-
-
-/* =========================================================
-   HISTORIAL
-   ========================================================= */
-
-function markPlayed(file){
-
-    if(!file)
-        return;
-
-
-    playHistory.push(
-        file.name
-    );
-
-
-    while(
-        playHistory.length >
-        100
-    ){
-
-        playHistory.shift();
+        await ensureAudioStarted();
 
     }
 
 
-    localStorage.setItem(
-        "hcpro_history",
-        JSON.stringify(
-            playHistory
-        )
-    );
-
-
-    const item =
-        library.find(
-            x =>
-            x.file === file
-        );
-
-
-    if(item){
-
-        item.plays++;
-
-        item.lastPlayed =
-            Date.now();
-
-    }
-
-}
-
-
-/* =========================================================
-   AUTO DJ
-   ========================================================= */
-
-function toggleAutoDJ(){
-
-    autoDJ =
-        !autoDJ;
-
-
-    $("autoState")
-        .textContent =
-        autoDJ
-            ? "ON"
-            : "OFF";
-
-
-    $("autoBtn")
-        .classList.toggle(
-            "fx-on",
-            autoDJ
-        );
-
-
-    if(autoDJ){
-
-        prepareAutoDJ();
-
-    }
-
-    else{
-
-        clearTimeout(
-            autoTimer
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   GRABACIÓN MIX
-   ========================================================= */
-
-function toggleRecording(){
-
-    initAudio();
-
-
-    if(
-        recorder &&
-        recorder.state ===
-        "recording"
-    ){
-
-        recorder.stop();
-
-        $("recState")
-            .textContent =
-            "READY";
-
-        $("recBtn")
-            .classList.remove(
-                "fx-on"
-            );
-
-        return;
-
-    }
-
-
-    recordingChunks = [];
-
-
-    const mime =
-        MediaRecorder
-            .isTypeSupported(
-                "audio/webm;codecs=opus"
-            )
-            ?
-            "audio/webm;codecs=opus"
-            :
-            "audio/webm";
-
-
-    recorder =
-        new MediaRecorder(
-            recordDestination.stream,
-            {
-                mimeType:mime
-            }
-        );
-
-
-    recorder.ondataavailable =
-        event => {
-
-            if(event.data.size){
-
-                recordingChunks
-                    .push(
-                        event.data
-                    );
-
-            }
-
-        };
-
-
-    recorder.onstop =
-        () => {
-
-            const blob =
-                new Blob(
-                    recordingChunks,
-                    {
-                        type:mime
-                    }
-                );
-
-
-            const url =
-                URL.createObjectURL(
-                    blob
-                );
-
-
-            const link =
-                document.createElement(
-                    "a"
-                );
-
-
-            link.href = url;
-
-
-            link.download =
-                "HC_PRO_MIX_" +
-                new Date()
-                    .toISOString()
-                    .replace(
-                        /[:.]/g,
-                        "-"
-                    ) +
-                ".webm";
-
-
-            link.click();
-
-
-            setTimeout(
-                () =>
-                URL.revokeObjectURL(url),
-                1000
-            );
-
-        };
-
-
-    recorder.start();
-
-
-    $("recState")
-        .textContent =
-        "RECORDING";
-
-
-    $("recBtn")
-        .classList.add(
-            "fx-on"
-        );
-
-}
-
-
-/* =========================================================
-   MICROFONO
-   ========================================================= */
-
-async function toggleMicrophone(){
-
-    initAudio();
-
-
-    if(micSource){
-
-        micSource.disconnect();
-
-        micSource = null;
-
-
-        if(micStream){
-
-            micStream
+    if (
+        state.micOn
+    ) {
+
+        if (
+            state.micStream
+        ) {
+
+            state.micStream
                 .getTracks()
                 .forEach(
                     track =>
-                    track.stop()
+                        track.stop()
                 );
 
         }
 
 
+        state.micOn =
+            false;
+
+
         $("micBtn")
-            .textContent =
-            "MIC OFF";
+            .classList.remove(
+                "active"
+            );
+
+
+        $("micBtn")
+            .querySelector(
+                "small"
+            ).textContent =
+            "OFF";
+
+
+        setStatus(
+            "Micrófono OFF",
+            false
+        );
 
 
         return;
@@ -2820,49 +4245,66 @@ async function toggleMicrophone(){
     }
 
 
-    try{
+    try {
 
-        micStream =
+        const stream =
             await navigator
                 .mediaDevices
                 .getUserMedia({
-                    audio:true
+                    audio: true
                 });
 
 
-        micSource =
-            audioContext
+        state.micStream =
+            stream;
+
+
+        state.micSource =
+            audioEngine.ctx
                 .createMediaStreamSource(
-                    micStream
+                    stream
                 );
 
 
-        micGain =
-            audioContext
-                .createGain();
+        state.micSource.connect(
+            audioEngine.micGain
+        );
 
 
-        micGain.gain.value =
-            Number(
-                $("micGain").value
-            );
+        audioEngine.micGain.connect(
+            audioEngine.masterGain
+        );
 
 
-        micSource
-            .connect(micGain)
-            .connect(masterGain);
+        state.micOn =
+            true;
 
 
         $("micBtn")
-            .textContent =
-            "MIC ON";
+            .classList.add(
+                "active"
+            );
 
-    }
 
-    catch(error){
+        $("micBtn")
+            .querySelector(
+                "small"
+            ).textContent =
+            "ON";
 
-        alert(
-            "No se pudo acceder al micrófono."
+
+        setStatus(
+            "Micrófono ON",
+            false
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        setStatus(
+            "No se pudo activar el micrófono.",
+            true
         );
 
     }
@@ -2871,112 +4313,459 @@ async function toggleMicrophone(){
 
 
 /* =========================================================
-   VISUALIZADOR
-   ========================================================= */
+   RECORDING
+========================================================= */
 
-function startVisualizer(){
+function getRecorderMime() {
+
+    const options = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus"
+    ];
+
+
+    return options.find(
+        type =>
+            MediaRecorder
+                .isTypeSupported(
+                    type
+                )
+    ) || "";
+
+}
+
+
+function startRecording() {
+
+    if (
+        !audioEngine.recordDestination
+    ) {
+
+        setStatus(
+            "Inicia primero el sistema.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    if (
+        typeof MediaRecorder ===
+        "undefined"
+    ) {
+
+        setStatus(
+            "Este navegador no soporta grabación.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    const mime =
+        getRecorderMime();
+
+
+    try {
+
+        state.recordChunks =
+            [];
+
+
+        state.recorder =
+            new MediaRecorder(
+                audioEngine
+                    .recordDestination
+                    .stream,
+                mime
+                    ? {
+                        mimeType:
+                            mime
+                    }
+                    : undefined
+            );
+
+
+        state.recorder.ondataavailable =
+            event => {
+
+                if (
+                    event.data &&
+                    event.data.size
+                ) {
+
+                    state.recordChunks
+                        .push(
+                            event.data
+                        );
+
+                }
+
+            };
+
+
+        state.recorder.onstop =
+            saveRecording;
+
+
+        state.recorder.start();
+
+
+        state.recording =
+            true;
+
+
+        $("recordStart")
+            .disabled =
+            true;
+
+
+        $("recordStop")
+            .disabled =
+            false;
+
+
+        setStatus(
+            "GRABANDO MIX...",
+            false
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        setStatus(
+            "No se pudo iniciar la grabación.",
+            true
+        );
+
+    }
+
+}
+
+
+function stopRecording() {
+
+    if (
+        !state.recorder ||
+        !state.recording
+    ) {
+
+        return;
+
+    }
+
+
+    state.recorder.stop();
+
+
+    state.recording =
+        false;
+
+
+    $("recordStart")
+        .disabled =
+        false;
+
+
+    $("recordStop")
+        .disabled =
+        true;
+
+
+    setStatus(
+        "Procesando grabación...",
+        false
+    );
+}
+
+
+function saveRecording() {
+
+    const blob =
+        new Blob(
+            state.recordChunks,
+            {
+                type:
+                    state.recorder
+                        ?.mimeType ||
+                    "audio/webm"
+            }
+        );
+
+
+    const url =
+        URL.createObjectURL(
+            blob
+        );
+
+
+    const link =
+        document.createElement(
+            "a"
+        );
+
+
+    link.href =
+        url;
+
+
+    link.download =
+        "HC-PRO-DJ-HUMBERTO-" +
+        new Date()
+            .toISOString()
+            .replace(
+                /[:.]/g,
+                "-"
+            ) +
+        ".webm";
+
+
+    document.body.appendChild(
+        link
+    );
+
+
+    link.click();
+
+
+    link.remove();
+
+
+    setTimeout(
+        () =>
+            URL.revokeObjectURL(
+                url
+            ),
+        2000
+    );
+
+
+    setStatus(
+        "Grabación guardada.",
+        false
+    );
+
+}
+
+
+/* =========================================================
+   VISUALIZER
+========================================================= */
+
+function startVisualizer() {
+
+    if (
+        state.raf
+    ) {
+
+        cancelAnimationFrame(
+            state.raf
+        );
+
+    }
+
 
     const canvas =
         $("visualizer");
 
 
-    const context =
-        canvas.getContext("2d");
+    const ctx =
+        canvas.getContext(
+            "2d"
+        );
+
+
+    const bars =
+        Array.from(
+            $("visualizerBars")
+                .querySelectorAll(
+                    "span"
+                )
+        );
+
+
+    function resize() {
+
+        const rect =
+            canvas.getBoundingClientRect();
+
+
+        const dpr =
+            window.devicePixelRatio ||
+            1;
+
+
+        canvas.width =
+            rect.width *
+            dpr;
+
+
+        canvas.height =
+            rect.height *
+            dpr;
+
+
+        ctx.setTransform(
+            dpr,
+            0,
+            0,
+            dpr,
+            0,
+            0
+        );
+
+    }
+
+
+    resize();
+
+   window.addEventListener(
+        "resize",
+        resize
+    );
 
 
     const data =
         new Uint8Array(
-            masterAnalyser
+            audioEngine
+                .analyser
                 .frequencyBinCount
         );
 
 
-    function draw(){
+    function draw() {
 
-        requestAnimationFrame(
-            draw
-        );
-
-
-        if(
-            canvas.width !==
-            canvas.clientWidth
-        ){
-
-            canvas.width =
-                canvas.clientWidth;
-
-        }
+        state.raf =
+            requestAnimationFrame(
+                draw
+            );
 
 
-        if(
-            canvas.height !==
-            canvas.clientHeight
-        ){
+        if (
+            !audioEngine.analyser
+        ) {
 
-            canvas.height =
-                canvas.clientHeight;
+            return;
 
         }
 
 
-        masterAnalyser
+        audioEngine.analyser
             .getByteFrequencyData(
                 data
             );
 
 
-        context.clearRect(
+        const width =
+            canvas.clientWidth;
+
+
+        const height =
+            canvas.clientHeight;
+
+
+        ctx.clearRect(
             0,
             0,
-            canvas.width,
-            canvas.height
+            width,
+            height
         );
 
 
-        const bars = 48;
-
-        const width =
-            canvas.width /
-            bars;
+        const barCount =
+            70;
 
 
-        for(
-            let i=0;
-            i<bars;
+        const barWidth =
+            width /
+            barCount;
+
+
+        for (
+            let i = 0;
+            i < barCount;
             i++
-        ){
+        ) {
+
+            const index =
+                Math.floor(
+                    i *
+                    data.length /
+                    barCount
+                );
+
 
             const value =
-                data[i*2] || 0;
+                data[index] /
+                255;
 
 
-            const height =
-                value/255 *
-                canvas.height;
+            const barHeight =
+                value *
+                height *
+                .8;
 
 
-            if(i%3===0)
-                context.fillStyle =
-                    "#ff7a18";
-
-            else if(i%3===1)
-                context.fillStyle =
-                    "#00d9ff";
-
-            else
-                context.fillStyle =
-                    "#9b5cff";
+            const x =
+                i *
+                barWidth;
 
 
-            context.fillRect(
-                i*width,
-                canvas.height-height,
-                width-2,
-                height
+            const gradient =
+                ctx.createLinearGradient(
+                    0,
+                    height,
+                    0,
+                    height -
+                    barHeight
+                );
+
+
+            gradient.addColorStop(
+                0,
+                "#ff6a00"
+            );
+
+
+            gradient.addColorStop(
+                1,
+                "#00e5ff"
+            );
+
+
+            ctx.fillStyle =
+                gradient;
+
+
+            ctx.fillRect(
+                x,
+                height -
+                barHeight,
+                Math.max(
+                    1,
+                    barWidth -
+                    2
+                ),
+                barHeight
             );
 
         }
+
+
+        updateVisualBars(
+            data
+        );
+
+
+        updateMeters(
+            data
+        );
 
     }
 
@@ -2986,378 +4775,42 @@ function startVisualizer(){
 }
 
 
-/* =========================================================
-   EVENTOS
-   ========================================================= */
+function updateVisualBars(data) {
 
-function bindEvents(){
-
-
-    $("startAudio").onclick =
-        () => {
-
-            initAudio();
-
-            audioContext.resume();
-
-            $("audioStatus")
-                .textContent =
-                "AUDIO ONLINE";
-
-        };
-
-
-    $("filesBtn").onclick =
-        () =>
-        $("fileInput").click();
-
-
-    $("folderBtn").onclick =
-        () =>
-        $("folderInput").click();
-
-
-    $("fileInput").onchange =
-        event =>
-        importFiles(
-            [...event.target.files]
-        );
-
-
-    $("folderInput").onchange =
-        event =>
-        importFiles(
-            [...event.target.files]
-        );
-
-
-    $("searchInput").oninput =
-        renderLibrary;
-
-
-    $("clearHistory").onclick =
-        () => {
-
-            playHistory.length = 0;
-
-            localStorage.removeItem(
-                "hcpro_history"
-            );
-
-        };
-
-
-    $("analyzeBtn").onclick =
-        () =>
-        updateSmartDisplay(
-            decks[activeDeck]
-                .analysis
-        );
-
-
-    $("nextBtn").onclick =
-        showBestCandidates;
-
-
-    $("playlistBtn").onclick =
-        generateSmartPlaylist;
-
-
-    $("autoBtn").onclick =
-        toggleAutoDJ;
-
-
-    $("recBtn").onclick =
-        toggleRecording;
-
-
-    $("micBtn").onclick =
-        toggleMicrophone;
-
-
-    $("micGain").oninput =
-        event => {
-
-            if(micGain){
-
-                micGain.gain.value =
-                    Number(
-                        event.target.value
-                    );
-
-            }
-
-        };
-
-
-    $("master").oninput =
-        event => {
-
-            if(masterGain){
-
-                masterGain.gain.value =
-                    Number(
-                        event.target.value
-                    );
-
-            }
-
-        };
-
-
-    $("crossfader").oninput =
-        event => {
-
-            const position =
-                Number(
-                    event.target.value
-                );
-
-
-            setDeckVolume(
-                "A",
-                Math.cos(
-                    position *
-                    Math.PI/2
+    const bars =
+        Array.from(
+            $("visualizerBars")
+                .querySelectorAll(
+                    "span"
                 )
-            );
+        );
 
 
-            setDeckVolume(
-                "B",
-                Math.sin(
-                    position *
-                    Math.PI/2
-                )
-            );
+    bars.forEach(
+        (bar, index) => {
 
-        };
-
-
-    $("lightsBtn").onclick =
-        () => {
-
-            lightsEnabled =
-                !lightsEnabled;
-
-
-            document.body
-                .classList.toggle(
-                    "lights-off",
-                    !lightsEnabled
+            const dataIndex =
+                Math.floor(
+                    index *
+                    data.length /
+                    bars.length
                 );
 
-        };
 
+            const value =
+                data[dataIndex] /
+                255;
 
-    $("strobeBtn").onclick =
-        () => {
 
-            document.body
-                .classList.toggle(
-                    "strobe-on"
-                );
+            const height =
+                15 +
+                value *
+                85;
 
-        };
 
-
-    /* BOTONES DECK */
-
-    document
-        .querySelectorAll(
-            "[data-action]"
-        )
-        .forEach(button => {
-
-            button.onclick =
-                () => {
-
-                    const deck =
-                        decks[
-                            button.dataset.deck
-                        ];
-
-
-                    const action =
-                        button.dataset.action;
-
-
-                    if(action === "load"){
-
-                        const input =
-                            document.createElement(
-                                "input"
-                            );
-
-
-                        input.type =
-                            "file";
-
-
-                        input.accept =
-                            "audio/*,video/*";
-
-
-                        input.onchange =
-                            event => {
-
-                                if(
-                                    event.target
-                                        .files[0]
-                                ){
-
-                                    deck.load(
-                                        event.target
-                                            .files[0]
-                                    );
-
-                                }
-
-                            };
-
-
-                        input.click();
-
-                    }
-
-
-                    if(action === "play")
-                        deck.play();
-
-
-                    if(action === "pause")
-                        deck.pause();
-
-
-                    if(action === "stop")
-                        deck.stop();
-
-                };
-
-        });
-
-
-    /* CONTROLES */
-
-    [
-
-        "gain",
-        "low",
-        "mid",
-        "high",
-        "pitch"
-
-    ].forEach(
-        control => {
-
-            ["A","B"].forEach(
-                deckID => {
-
-                    $(control+deckID)
-                        .oninput =
-                        event => {
-
-                            decks[deckID]
-                                .setControl(
-                                    control,
-                                    event.target.value
-                                );
-
-                        };
-
-                }
-            );
-
-        }
-    );
-
-
-    /* FX */
-
-    document
-        .querySelectorAll(
-            "[data-fx]"
-        )
-        .forEach(button => {
-
-            button.onclick =
-                () => {
-
-                    const deck =
-                        decks[
-                            button.dataset.deck
-                        ];
-
-
-                    const fx =
-                        button.dataset.fx;
-
-
-                    deck.toggleFX(
-                        fx
-                    );
-
-
-                    button.classList.toggle(
-                        "fx-on",
-                        deck.fx[fx]
-                    );
-
-                };
-
-        });
-
-
-    /* RELOJ */
-
-    setInterval(
-        () => {
-
-            $("clock")
-                .textContent =
-                new Date()
-                    .toLocaleTimeString(
-                        "es-AR"
-                    );
-
-        },
-        1000
-    );
-
-
-    /* ATAJO ESPACIO */
-
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if(
-                event.code ===
-                "Space" &&
-                event.target.tagName !==
-                "INPUT"
-            ){
-
-                event.preventDefault();
-
-                if(
-                    decks[activeDeck]
-                        .media.paused
-                ){
-
-                    decks[activeDeck]
-                        .play();
-
-                }
-
-                else{
-
-                    decks[activeDeck]
-                        .pause();
-
-                }
-
-            }
+            bar.style.height =
+                height +
+                "%";
 
         }
     );
@@ -3365,23 +4818,840 @@ function bindEvents(){
 }
 
 
+function updateMeters(data) {
+
+    if (
+        !data ||
+        !data.length
+    ) {
+
+        return;
+
+    }
+
+
+    let sum = 0;
+
+
+    for (
+        let i = 0;
+        i < data.length;
+        i++
+    ) {
+
+        const normalized =
+            data[i] /
+            255;
+
+        sum +=
+            normalized *
+            normalized;
+
+    }
+
+
+    const rms =
+        Math.sqrt(
+            sum /
+            data.length
+        );
+
+
+    const level =
+        clamp(
+            rms *
+            250,
+            0,
+            100
+        );
+
+
+    $("meterL").style.width =
+        level +
+        "%";
+
+
+    $("meterR").style.width =
+        clamp(
+            level *
+            (
+                .9 +
+                Math.random() *
+                .15
+            ),
+            0,
+            100
+        ) +
+        "%";
+
+}
+   /* =========================================================
+   HISTORY
+========================================================= */
+
+function pushHistory(track) {
+
+    if (!track) {
+        return;
+    }
+
+
+    state.history.push(
+        track.id
+    );
+
+
+    if (
+        state.history.length >
+        30
+    ) {
+
+        state.history.shift();
+
+    }
+
+
+    try {
+
+        localStorage.setItem(
+            "HC_PRO_HISTORY",
+            JSON.stringify(
+                state.history
+            )
+        );
+
+    } catch (_) {}
+
+}
+
+
 /* =========================================================
-   API
-   ========================================================= */
+   LOCAL STORAGE
+========================================================= */
+
+function saveLibraryMetadata() {
+
+    try {
+
+        const data =
+            state.library.map(
+                track => ({
+                    id:
+                        track.id,
+
+                    title:
+                        track.title,
+
+                    artist:
+                        track.artist,
+
+                    genre:
+                        track.genre,
+
+                    bpm:
+                        track.bpm,
+
+                    key:
+                        track.key,
+
+                    energy:
+                        track.energy,
+
+                    duration:
+                        track.duration,
+
+                    analyzed:
+                        track.analyzed
+                })
+            );
+
+
+        localStorage.setItem(
+            "HC_PRO_LIBRARY_METADATA",
+            JSON.stringify(
+                data
+            )
+        );
+
+    } catch (_) {}
+
+}
+  /* =========================================================
+   CLEAR LIBRARY
+========================================================= */
+
+function clearLibrary() {
+
+    if (
+        !state.library.length
+    ) {
+
+        return;
+
+    }
+
+
+    const confirmClear =
+        window.confirm(
+            "¿Limpiar toda la biblioteca?"
+        );
+
+
+    if (!confirmClear) {
+        return;
+    }
+
+
+    state.library =
+        [];
+
+
+    state.smartQueue =
+        [];
+
+
+    state.smartResults =
+        [];
+
+
+    renderLibrary();
+
+    renderQueue();
+
+
+    $("smartResults").innerHTML =
+        '<div class="empty-smart">' +
+        'Importa música para comenzar.' +
+        '</div>';
+
+
+    try {
+
+        localStorage.removeItem(
+            "HC_PRO_LIBRARY_METADATA"
+        );
+
+    } catch (_) {}
+
+
+    setStatus(
+        "Biblioteca limpiada.",
+        false
+    );
+
+}
+
+
+/* =========================================================
+   KEYBOARD
+========================================================= */
+
+function setupKeyboard() {
+
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            if (
+                event.target.tagName ===
+                "INPUT" ||
+                event.target.tagName ===
+                "SELECT" ||
+                event.target.tagName ===
+                "BUTTON"
+            ) {
+
+                return;
+
+            }
+
+
+            if (
+                event.code ===
+                "Space"
+            ) {
+
+                event.preventDefault();
+
+
+                const deck =
+                    getActiveDeck();
+
+
+                if (!deck) {
+                    return;
+                }
+
+
+                if (
+                    deck.media.paused
+                ) {
+
+                    deck.play();
+
+                } else {
+
+                    deck.pause();
+
+                }
+
+            }
+
+
+            if (
+                event.key === "1"
+            ) {
+
+                setActiveDeck("A");
+
+            }
+
+
+            if (
+                event.key === "2"
+            ) {
+
+                setActiveDeck("B");
+
+            }
+
+
+            if (
+                event.key.toLowerCase() ===
+                "q"
+            ) {
+
+                setCrossfader(0);
+
+            }
+
+
+            if (
+                event.key.toLowerCase() ===
+                "w"
+            ) {
+
+                setCrossfader(.5);
+
+            }
+
+
+            if (
+                event.key.toLowerCase() ===
+                "e"
+            ) {
+
+                setCrossfader(1);
+
+            }
+
+        }
+    );
+
+} 
+ /* =========================================================
+   EVENT BINDINGS
+========================================================= */
+
+function bindEvents() {
+
+    $("startAudioBtn")
+        .addEventListener(
+            "click",
+            startSystem
+        );
+
+
+    setupDeckControls("A");
+
+    setupDeckControls("B");
+
+
+    $("fileA")
+        .addEventListener(
+            "change",
+            event =>
+                loadDeckInput(
+                    "A",
+                    event.target.files[0]
+                )
+        );
+
+
+    $("fileB")
+        .addEventListener(
+            "change",
+            event =>
+                loadDeckInput(
+                    "B",
+                    event.target.files[0]
+                )
+        );
+
+
+    $("masterVolume")
+        .addEventListener(
+            "input",
+            event => {
+
+                const value =
+                    Number(
+                        event.target.value
+                    );
+
+
+                if (
+                    audioEngine.masterGain
+                ) {
+
+                    audioEngine.masterGain
+                        .gain.value =
+                        value;
+
+                }
+
+
+                $("masterValue")
+                    .textContent =
+                    Math.round(
+                        value * 100
+                    ) +
+                    "%";
+
+            }
+        );
+
+
+    $("crossfader")
+        .addEventListener(
+            "input",
+            updateCrossfader
+        );
+
+
+    $("transitionMode")
+        .addEventListener(
+            "change",
+            event => {
+
+                state.transitionMode =
+                    event.target.value;
+
+            }
+        );
+
+
+    $("autoDJBtn")
+        .addEventListener(
+            "click",
+            toggleAutoDJ
+        );
+
+
+    $("prepareNextBtn")
+        .addEventListener(
+            "click",
+            prepareNextTrack
+        );
+
+
+    $("micBtn")
+        .addEventListener(
+            "click",
+            toggleMic
+        );
+
+
+    $("recordStart")
+        .addEventListener(
+            "click",
+            startRecording
+        );
+
+
+    $("recordStop")
+        .addEventListener(
+            "click",
+            stopRecording
+        );
+
+
+    $("libraryInput")
+        .addEventListener(
+            "change",
+            event => {
+
+                addFilesToLibrary(
+                    event.target.files
+                );
+
+                event.target.value =
+                    "";
+
+            }
+        );
+
+
+    $("folderInput")
+        .addEventListener(
+            "change",
+            event => {
+
+                addFilesToLibrary(
+                    event.target.files
+                );
+
+                event.target.value =
+                    "";
+
+            }
+        );
+
+
+    $("analyzeLibrary")
+        .addEventListener(
+            "click",
+            analyzeAllLibrary
+        );
+
+
+    $("smartAnalyzeBtn")
+        .addEventListener(
+            "click",
+            async () => {
+
+                const track =
+                    getActiveDeck()?.track;
+
+
+                if (!track) {
+
+                    setStatus(
+                        "No hay canción actual.",
+                        true
+                    );
+
+                    return;
+
+                }
+
+
+                await analyzeTrack(
+                    track
+                );
+
+            }
+        );
+
+
+    $("findNextBtn")
+        .addEventListener(
+            "click",
+            findBestNext
+        );
+
+
+    $("smartPlaylistBtn")
+        .addEventListener(
+            "click",
+            createSmartPlaylist
+        );
+
+
+    $("clearLibrary")
+        .addEventListener(
+            "click",
+            clearLibrary
+        );
+
+
+    $("libraryBody")
+        .addEventListener(
+            "click",
+            async event => {
+
+                const button =
+                    event.target.closest(
+                        "button"
+                    );
+
+
+                if (!button) {
+                    return;
+                }
+
+
+                await handleLibraryAction(
+                    button.dataset.action,
+                    button.dataset.id
+                );
+
+            }
+        );
+
+
+    $("smartResults")
+        .addEventListener(
+            "click",
+            event => {
+
+                const button =
+                    event.target.closest(
+                        "[data-smart-id]"
+                    );
+
+
+                if (!button) {
+                    return;
+                }
+
+
+                loadSmartToB(
+                    button.dataset.smartId
+                );
+
+            }
+        );
+
+
+    $("videoPlayer")
+        .addEventListener(
+            "click",
+            () => {
+
+                const deck =
+                    getActiveDeck();
+
+
+                if (!deck) {
+                    return;
+                }
+
+
+                if (
+                    deck.media.paused
+                ) {
+
+                    deck.play();
+
+                } else {
+
+                    deck.pause();
+
+                }
+
+            }
+        );
+
+
+    setupKeyboard();
+
+}
+   /* =========================================================
+   ANALYZE ALL
+========================================================= */
+
+async function analyzeAllLibrary() {
+
+    if (
+        !state.library.length
+    ) {
+
+        setStatus(
+            "La biblioteca está vacía.",
+            true
+        );
+
+        return;
+
+    }
+
+
+    await ensureAudioStarted();
+
+
+    for (
+        let i = 0;
+        i < state.library.length;
+        i++
+    ) {
+
+        const track =
+            state.library[i];
+
+
+        setStatus(
+            "Analizando " +
+            (i + 1) +
+            "/" +
+            state.library.length +
+            ": " +
+            track.title,
+            false
+        );
+
+
+        await analyzeTrack(
+            track
+        );
+
+
+        /*
+          Small delay prevents UI freeze.
+        */
+
+        await new Promise(
+            resolve =>
+                setTimeout(
+                    resolve,
+                    20
+                )
+        );
+
+    }
+
+
+    setStatus(
+        "Análisis de biblioteca terminado.",
+        false
+    );
+
+}
+
+
+/* =========================================================
+   RESTORE HISTORY
+========================================================= */
+
+function restoreHistory() {
+
+    try {
+
+        const saved =
+            JSON.parse(
+                localStorage.getItem(
+                    "HC_PRO_HISTORY"
+                ) ||
+                "[]"
+            );
+
+
+        if (
+            Array.isArray(saved)
+        ) {
+
+            state.history =
+                saved;
+
+        }
+
+    } catch (_) {}
+
+}
+
+
+/* =========================================================
+   INITIALIZATION
+========================================================= */
+
+function initializeApp() {
+
+    try {
+
+        restoreHistory();
+
+        bindEvents();
+
+        renderLibrary();
+
+        renderQueue();
+
+        updateCrossfader();
+
+        setStatus(
+            "SISTEMA LISTO",
+            false
+        );
+
+
+        console.log(
+            "HC PRO DJ HUMBERTO 3.0 READY"
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            "HC PRO initialization error:",
+            error
+        );
+
+
+        const status =
+            $("systemStatus");
+
+
+        if (status) {
+
+            status.textContent =
+                "ERROR JS";
+
+            status.style.color =
+                "var(--red)";
+
+        }
+
+    }
+
+}
+
+ /* =========================================================
+   PUBLIC API
+========================================================= */
 
 window.HCPRO = {
 
-    loadTrack
+    version:
+        "3.0",
+
+    state,
+
+    audioEngine,
+
+    start:
+        startSystem,
+
+    prepareNext:
+        prepareNextTrack,
+
+    smartNext:
+        findBestNext,
+
+    autoDJ:
+        toggleAutoDJ
 
 };
 
 
 /* =========================================================
-   ARRANQUE
-   ========================================================= */
+   START
+========================================================= */
 
-bindEvents();
+if (
+    document.readyState ===
+    "loading"
+) {
 
-renderLibrary();
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeApp
+    );
+
+} else {
+
+    initializeApp();
+
+}
+
 
 })();
