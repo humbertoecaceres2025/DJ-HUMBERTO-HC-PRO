@@ -1,654 +1,950 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#05070d">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#02040a">
 
-  <title>DJ HUMBERTO 3.2.2 PRO</title>
+<title>DJ HUMBERTO 3.3 PRO</title>
 
-  <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
 
-  <!-- =====================================================
-       PANTALLA DE INICIO
-  ====================================================== -->
+<!-- =====================================================
+     INICIO
+====================================================== -->
 
-  <div id="bootScreen" class="boot-screen">
+<div id="boot" class="boot">
 
-    <div class="boot-box">
+    <div class="boot-card">
 
-      <div class="boot-logo">
-        HC
-      </div>
+        <div class="hc-logo">
+            HC
+        </div>
 
-      <h1>DJ HUMBERTO</h1>
+        <h1>DJ HUMBERTO</h1>
 
-      <div class="boot-subtitle">
-        HC PRO • PROFESSIONAL DJ SYSTEM
-      </div>
+        <p>
+            HC PRO • PROFESSIONAL DJ SYSTEM
+        </p>
 
-      <div class="boot-version">
-        VERSION 3.2.2 PRO
-      </div>
+        <div class="version">
+            VERSION 3.3 PRO
+        </div>
 
-      <button id="startButton" class="start-button">
-        ▶ INICIAR DJ HUMBERTO
-      </button>
+        <button id="startButton">
+            ▶ INICIAR DJ HUMBERTO
+        </button>
 
-      <div id="bootMessage" class="boot-message">
-        Sistema preparado
-      </div>
+        <small id="bootMessage">
+            Sistema preparado
+        </small>
 
     </div>
 
-  </div>
+</div>
 
 
-  <!-- =====================================================
-       APLICACIÓN
-  ====================================================== -->
+<!-- =====================================================
+     APLICACIÓN
+====================================================== -->
 
-  <main id="app">
+<main id="app">
 
-    <!-- HEADER -->
 
-    <header class="topbar">
+<!-- =====================================================
+     HEADER
+====================================================== -->
 
-      <div class="brand">
+<header class="topbar">
+
+    <div class="brand">
 
         <div class="brand-logo">
-          HC
+            HC
         </div>
 
         <div>
-          <h1>DJ HUMBERTO</h1>
-          <p>HC PRO • PROFESSIONAL DJ SYSTEM</p>
+            <h1>DJ HUMBERTO</h1>
+            <span>
+                HC PRO • PROFESSIONAL DJ SYSTEM 3.3
+            </span>
         </div>
 
-      </div>
+    </div>
 
-      <div class="system-info">
+    <div class="system">
 
-        <div id="systemStatus" class="online">
-          ● SISTEMA LISTO
+        <div class="system-status">
+            <i></i>
+            <span id="systemStatus">
+                SYSTEM READY
+            </span>
         </div>
 
-        <div id="clock">
-          --:--:--
-        </div>
+        <strong id="clock">
+            --:--:--
+        </strong>
 
-      </div>
+    </div>
 
-    </header>
+</header>
 
 
-    <!-- =====================================================
-         VISUALIZADOR
-    ====================================================== -->
+<!-- =====================================================
+     ESCENARIO CENTRAL
+====================================================== -->
 
-    <section class="visual-section">
+<section class="hero">
 
-      <canvas id="visualizer"></canvas>
+    <canvas id="visualizer"></canvas>
 
-      <div class="visual-overlay">
+    <div class="stars"></div>
 
-        <div class="now-playing">
+    <div class="laser laser-one"></div>
+    <div class="laser laser-two"></div>
+    <div class="laser laser-three"></div>
 
-          <span>NOW PLAYING</span>
+    <div class="hero-title">
 
-          <h2 id="nowTitle">
+        <span>D</span>
+        <span>J</span>
+        <span class="space"> </span>
+        <span>H</span>
+        <span>U</span>
+        <span>M</span>
+        <span>B</span>
+        <span>E</span>
+        <span>R</span>
+        <span>T</span>
+        <span>O</span>
+
+    </div>
+
+    <div class="hero-subtitle">
+        HC PRO • LIVE MIXING • AUTOMATION
+    </div>
+
+    <div class="hero-now">
+
+        <small>
+            NOW PLAYING
+        </small>
+
+        <strong id="nowPlaying">
             SIN PISTA
-          </h2>
+        </strong>
 
-          <p id="nowInfo">
-            Carga una canción en un deck
-          </p>
+        <span id="nowInfo">
+            Carga una pista en Deck A o Deck B
+        </span>
 
-        </div>
+    </div>
 
-        <div class="live-indicator">
-          ● LIVE
-        </div>
-
-      </div>
-
-      <video
-        id="videoPlayer"
-        class="video-player"
-        playsinline
-        muted>
-      </video>
-
-    </section>
+</section>
 
 
-    <!-- =====================================================
-         CABINA
-    ====================================================== -->
+<!-- =====================================================
+     CABINA PRINCIPAL
+====================================================== -->
 
-    <section class="dj-console">
+<section class="console">
 
 
-      <!-- ================= DECK A ================= -->
+<!-- =====================================================
+     DECK A
+====================================================== -->
 
-      <article id="deckA" class="deck">
+<article class="deck" id="deckA">
 
-        <div class="deck-header">
+    <div class="deck-header">
 
-          <span>DECK A</span>
+        <strong>
+            DECK A
+        </strong>
 
-          <strong id="deckStatusA">
+        <span id="deckStatusA">
             READY
-          </strong>
+        </span>
 
-        </div>
+    </div>
 
-        <div class="turntable">
 
-          <div class="vinyl">
+    <div class="turntable">
+
+        <div class="vinyl">
 
             <div class="vinyl-label">
-              DJ
-              <strong>HC</strong>
+
+                <small>DJ</small>
+
+                <strong>
+                    HC
+                </strong>
+
+                <small>
+                    PRO
+                </small>
+
             </div>
 
-          </div>
-
         </div>
 
-        <h3 id="titleA">
-          DECK A VACÍO
-        </h3>
+    </div>
 
-        <p id="infoA">
-          BPM -- • KEY -- • ENERGY --
-        </p>
 
-        <div class="deck-buttons">
+    <h2 id="titleA">
+        DECK A VACÍO
+    </h2>
 
-          <button id="loadA">
+    <p id="infoA">
+        BPM -- • KEY -- • ENERGY --
+    </p>
+
+
+    <div class="controls-row">
+
+        <button id="loadA">
             📂 CARGAR
-          </button>
+        </button>
 
-          <button id="playA" class="main-play">
+        <button id="playA" class="play">
             ▶ PLAY
-          </button>
+        </button>
 
-          <button id="stopA">
+        <button id="stopA">
             ■ STOP
-          </button>
+        </button>
 
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            VOLUMEN
+            <output id="volumeAValue">
+                80%
+            </output>
         </div>
 
-        <div class="control">
-
-          <div>
-            <span>VOLUMEN</span>
-            <output id="volumeAValue">80%</output>
-          </div>
-
-          <input
+        <input
             id="volumeA"
             type="range"
             min="0"
             max="100"
             value="80">
 
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            PITCH
+            <output id="pitchAValue">
+                0%
+            </output>
         </div>
 
-        <div class="control">
-
-          <div>
-            <span>PITCH</span>
-            <output id="pitchAValue">0%</output>
-          </div>
-
-          <input
+        <input
             id="pitchA"
             type="range"
             min="-20"
             max="20"
             value="0">
 
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            SEEK
+            <output id="timeA">
+                00:00
+            </output>
         </div>
 
-        <div class="control">
-
-          <div>
-            <span>SEEK</span>
-            <output id="timeA">00:00</output>
-          </div>
-
-          <input
+        <input
             id="seekA"
             type="range"
             min="0"
             max="100"
             value="0">
 
+    </div>
+
+
+    <!-- EFECTOS A -->
+
+    <div class="effects">
+
+        <h3>
+            EFECTOS DECK A
+        </h3>
+
+        <div class="effect-buttons">
+
+            <button data-deck="A" data-effect="filter">
+                FILTER
+            </button>
+
+            <button data-deck="A" data-effect="echo">
+                ECHO
+            </button>
+
+            <button data-deck="A" data-effect="reverb">
+                REVERB
+            </button>
+
+            <button data-deck="A" data-effect="flanger">
+                FLANGER
+            </button>
+
         </div>
 
-      </article>
+
+        <div class="fx-slider">
+
+            <label>
+                FX MIX
+
+                <input
+                    id="fxMixA"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="0">
+
+            </label>
+
+        </div>
+
+    </div>
+
+</article>
 
 
-      <!-- ================= MIXER ================= -->
+<!-- =====================================================
+     MIXER CENTRAL
+====================================================== -->
 
-      <aside class="mixer">
+<aside class="mixer">
 
-        <h2>
-          HC PRO MIXER
-        </h2>
+    <h2>
+        HC PRO MIXER
+    </h2>
 
-        <div class="mixer-section">
 
-          <div class="mixer-title">
+    <div class="vu">
+
+        <div class="vu-bar">
+            <span id="vuA"></span>
+        </div>
+
+        <div class="vu-bar">
+            <span id="vuB"></span>
+        </div>
+
+    </div>
+
+
+    <div class="mixer-control">
+
+        <div>
             MASTER
-            <output id="masterValue">85%</output>
-          </div>
 
-          <input
+            <output id="masterValue">
+                85%
+            </output>
+        </div>
+
+        <input
             id="master"
             type="range"
             min="0"
             max="100"
             value="85">
 
-        </div>
+    </div>
 
 
-        <div class="eq-panel">
+    <div class="mixer-control">
 
-          <h3>3 BAND EQ</h3>
-
-          <label>
-            HIGH
-            <input
-              id="high"
-              type="range"
-              min="-12"
-              max="12"
-              value="0">
-          </label>
-
-          <label>
-            MID
-            <input
-              id="mid"
-              type="range"
-              min="-12"
-              max="12"
-              value="0">
-          </label>
-
-          <label>
-            LOW
-            <input
-              id="low"
-              type="range"
-              min="-12"
-              max="12"
-              value="0">
-          </label>
-
-        </div>
-
-
-        <div class="mixer-section">
-
-          <div class="mixer-title">
+        <div>
             CROSSFADER
-          </div>
 
-          <input
+            <output id="crossValue">
+                50%
+            </output>
+        </div>
+
+        <input
             id="crossfader"
             type="range"
             min="0"
             max="100"
             value="50">
 
-        </div>
+    </div>
 
 
-        <div class="effects">
+    <!-- EQ -->
 
-          <h3>EFFECTS</h3>
+    <div class="eq">
 
-          <button data-effect="filter">
-            FILTER
-          </button>
-
-          <button data-effect="echo">
-            ECHO
-          </button>
-
-          <button data-effect="reverb">
-            REVERB
-          </button>
-
-        </div>
-
-
-        <button id="recordButton" class="record-button">
-          ● GRABAR MIX
-        </button>
-
-        <button id="micButton" class="mic-button">
-          🎤 MIC OFF
-        </button>
-
-        <div id="recordStatus" class="record-status">
-          REC OFF
-        </div>
-
-      </aside>
-
-
-      <!-- ================= DECK B ================= -->
-
-      <article id="deckB" class="deck">
-
-        <div class="deck-header">
-
-          <span>DECK B</span>
-
-          <strong id="deckStatusB">
-            READY
-          </strong>
-
-        </div>
-
-        <div class="turntable">
-
-          <div class="vinyl">
-
-            <div class="vinyl-label">
-              HC
-              <strong>PRO</strong>
-            </div>
-
-          </div>
-
-        </div>
-
-        <h3 id="titleB">
-          DECK B VACÍO
+        <h3>
+            3 BAND EQ
         </h3>
 
-        <p id="infoB">
-          BPM -- • KEY -- • ENERGY --
-        </p>
+        <label>
+            HIGH
 
-        <div class="deck-buttons">
+            <input
+                id="eqHigh"
+                type="range"
+                min="-12"
+                max="12"
+                value="0">
 
-          <button id="loadB">
-            📂 CARGAR
-          </button>
+        </label>
 
-          <button id="playB" class="main-play">
-            ▶ PLAY
-          </button>
 
-          <button id="stopB">
-            ■ STOP
-          </button>
+        <label>
+            MID
+
+            <input
+                id="eqMid"
+                type="range"
+                min="-12"
+                max="12"
+                value="0">
+
+        </label>
+
+
+        <label>
+            LOW
+
+            <input
+                id="eqLow"
+                type="range"
+                min="-12"
+                max="12"
+                value="0">
+
+        </label>
+
+    </div>
+
+
+    <!-- AUTOMIX -->
+
+    <div class="automation">
+
+        <h3>
+            🔀 AUTOMIX
+        </h3>
+
+        <select id="mixDuration">
+
+            <option value="5">
+                5 segundos
+            </option>
+
+            <option value="10">
+                10 segundos
+            </option>
+
+            <option value="15">
+                15 segundos
+            </option>
+
+            <option value="20">
+                20 segundos
+            </option>
+
+            <option value="30">
+                30 segundos
+            </option>
+
+            <option value="45">
+                45 segundos
+            </option>
+
+        </select>
+
+
+        <button id="autoMixButton">
+            🔀 AUTOMIX OFF
+        </button>
+
+
+        <small id="autoMixStatus">
+            Transición programable
+        </small>
+
+    </div>
+
+
+    <!-- VOICE ID -->
+
+    <div class="automation">
+
+        <h3>
+            🎙 VOICE ID AUTOMÁTICO
+        </h3>
+
+        <select id="voiceInterval">
+
+            <option value="5">
+                Cada 5 minutos
+            </option>
+
+            <option value="10">
+                Cada 10 minutos
+            </option>
+
+            <option value="15">
+                Cada 15 minutos
+            </option>
+
+        </select>
+
+
+        <button id="autoVoiceButton">
+            🎙 VOICE ID OFF
+        </button>
+
+
+        <small id="voiceStatus">
+            Carga un Voice ID
+        </small>
+
+    </div>
+
+
+    <div class="controls-row">
+
+        <button id="recordButton">
+            ● GRABAR
+        </button>
+
+        <button id="micButton">
+            🎤 MIC OFF
+        </button>
+
+    </div>
+
+</aside>
+
+
+<!-- =====================================================
+     DECK B
+====================================================== -->
+
+<article class="deck" id="deckB">
+
+    <div class="deck-header">
+
+        <strong>
+            DECK B
+        </strong>
+
+        <span id="deckStatusB">
+            READY
+        </span>
+
+    </div>
+
+
+    <div class="turntable">
+
+        <div class="vinyl">
+
+            <div class="vinyl-label">
+
+                <small>HC</small>
+
+                <strong>
+                    PRO
+                </strong>
+
+                <small>
+                    DJ
+                </small>
+
+            </div>
 
         </div>
 
-        <div class="control">
+    </div>
 
-          <div>
-            <span>VOLUMEN</span>
-            <output id="volumeBValue">80%</output>
-          </div>
 
-          <input
+    <h2 id="titleB">
+        DECK B VACÍO
+    </h2>
+
+    <p id="infoB">
+        BPM -- • KEY -- • ENERGY --
+    </p>
+
+
+    <div class="controls-row">
+
+        <button id="loadB">
+            📂 CARGAR
+        </button>
+
+        <button id="playB" class="play">
+            ▶ PLAY
+        </button>
+
+        <button id="stopB">
+            ■ STOP
+        </button>
+
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            VOLUMEN
+
+            <output id="volumeBValue">
+                80%
+            </output>
+        </div>
+
+        <input
             id="volumeB"
             type="range"
             min="0"
             max="100"
             value="80">
 
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            PITCH
+
+            <output id="pitchBValue">
+                0%
+            </output>
         </div>
 
-        <div class="control">
-
-          <div>
-            <span>PITCH</span>
-            <output id="pitchBValue">0%</output>
-          </div>
-
-          <input
+        <input
             id="pitchB"
             type="range"
             min="-20"
             max="20"
             value="0">
 
+    </div>
+
+
+    <div class="slider-control">
+
+        <div>
+            SEEK
+
+            <output id="timeB">
+                00:00
+            </output>
         </div>
 
-        <div class="control">
-
-          <div>
-            <span>SEEK</span>
-            <output id="timeB">00:00</output>
-          </div>
-
-          <input
+        <input
             id="seekB"
             type="range"
             min="0"
             max="100"
             value="0">
 
+    </div>
+
+
+    <!-- EFECTOS B -->
+
+    <div class="effects">
+
+        <h3>
+            EFECTOS DECK B
+        </h3>
+
+        <div class="effect-buttons">
+
+            <button data-deck="B" data-effect="filter">
+                FILTER
+            </button>
+
+            <button data-deck="B" data-effect="echo">
+                ECHO
+            </button>
+
+            <button data-deck="B" data-effect="reverb">
+                REVERB
+            </button>
+
+            <button data-deck="B" data-effect="flanger">
+                FLANGER
+            </button>
+
         </div>
 
-      </article>
 
-    </section>
+        <div class="fx-slider">
+
+            <label>
+                FX MIX
+
+                <input
+                    id="fxMixB"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="0">
+
+            </label>
+
+        </div>
+
+    </div>
+
+</article>
+
+</section>
 
 
-    <!-- =====================================================
-         SMART DJ
-    ====================================================== -->
+<!-- =====================================================
+     SMART DJ
+====================================================== -->
 
-    <section class="panel">
+<section class="panel">
 
-      <div class="panel-header">
+    <div class="panel-header">
 
         <div>
-          <small>INTELLIGENT ENGINE</small>
-          <h2>SMART DJ</h2>
+
+            <small>
+                INTELLIGENT ENGINE
+            </small>
+
+            <h2>
+                SMART DJ
+            </h2>
+
         </div>
 
         <strong id="smartStatus">
-          READY
+            READY
         </strong>
 
-      </div>
+    </div>
 
-      <div class="smart-grid">
+
+    <div class="smart-grid">
 
         <div>
-          <span>BPM</span>
-          <strong id="smartBpm">--</strong>
+            BPM
+            <strong id="smartBpm">
+                --
+            </strong>
         </div>
 
         <div>
-          <span>KEY</span>
-          <strong id="smartKey">--</strong>
+            KEY
+            <strong id="smartKey">
+                --
+            </strong>
         </div>
 
         <div>
-          <span>ENERGY</span>
-          <strong id="smartEnergy">--</strong>
+            ENERGY
+            <strong id="smartEnergy">
+                --
+            </strong>
         </div>
 
         <div>
-          <span>NEXT</span>
-          <strong id="nextTrack">AUTOMÁTICO</strong>
+            NEXT
+            <strong id="nextTrack">
+                AUTOMÁTICO
+            </strong>
         </div>
 
-      </div>
+    </div>
 
-      <div class="panel-buttons">
+
+    <div class="controls-row">
 
         <button id="smartNext">
-          🧠 SIGUIENTE INTELIGENTE
+            🧠 SIGUIENTE INTELIGENTE
         </button>
 
-        <button id="autoDj">
-          🤖 AUTO DJ OFF
+        <button id="shuffleButton">
+            🔀 SHUFFLE
         </button>
 
-        <button id="shuffle">
-          🔀 SHUFFLE
-        </button>
+    </div>
 
-      </div>
-
-    </section>
+</section>
 
 
-    <!-- =====================================================
-         BIBLIOTECA
-    ====================================================== -->
+<!-- =====================================================
+     BIBLIOTECA
+====================================================== -->
 
-    <section class="panel">
+<section class="panel">
 
-      <div class="panel-header">
+    <div class="panel-header">
 
         <div>
-          <small>MUSIC DATABASE</small>
-          <h2>BIBLIOTECA</h2>
+
+            <small>
+                MUSIC DATABASE
+            </small>
+
+            <h2>
+                BIBLIOTECA
+            </h2>
+
         </div>
 
         <strong id="trackCount">
-          0 PISTAS
+            0 PISTAS
         </strong>
 
-      </div>
+    </div>
 
-      <div class="panel-buttons">
+
+    <div class="controls-row">
 
         <button id="addMusic">
-          📂 AGREGAR MÚSICA
+            📂 AGREGAR MÚSICA
         </button>
 
         <button id="clearLibrary">
-          🗑 LIMPIAR
+            🗑 LIMPIAR
         </button>
 
-      </div>
+    </div>
 
-      <div id="library" class="library">
+
+    <div
+        id="library"
+        class="library">
 
         <div class="library-empty">
-          No hay pistas cargadas.
+            No hay pistas cargadas.
         </div>
 
-      </div>
+    </div>
 
-    </section>
+</section>
 
 
-    <!-- =====================================================
-         VOICE ID
-    ====================================================== -->
+<!-- =====================================================
+     VOICE ID
+====================================================== -->
 
-    <section class="panel">
+<section class="panel">
 
-      <div class="panel-header">
+    <div class="panel-header">
 
         <div>
-          <small>STATION ID</small>
-          <h2>VOICE ID</h2>
+
+            <small>
+                STATION IDENTIFICATION
+            </small>
+
+            <h2>
+                VOICE ID
+            </h2>
+
         </div>
 
-        <strong id="voiceStatus">
-          OFF
+        <strong id="voiceReady">
+            OFF
         </strong>
 
-      </div>
+    </div>
 
-      <div class="panel-buttons">
+
+    <div class="controls-row">
 
         <button id="loadVoice">
-          🎙 CARGAR ID
+            🎙 CARGAR VOICE ID
         </button>
 
         <button id="playVoice">
-          ▶ REPRODUCIR ID
+            ▶ PROBAR VOICE ID
         </button>
 
-        <label class="voice-volume">
-          VOL
-          <input
-            id="voiceVolume"
-            type="range"
-            min="0"
-            max="100"
-            value="70">
-        </label>
+    </div>
 
-      </div>
-
-    </section>
+</section>
 
 
-    <footer>
-      DJ HUMBERTO • HC PRO • VERSION 3.2.2 PRO
-      <br>
-      LA RIOJA ARGENTINA
-    </footer>
+<footer>
 
-  </main>
+    DJ HUMBERTO • HC PRO • VERSION 3.3 PRO
+    <br>
+    LA RIOJA ARGENTINA
+
+</footer>
+
+</main>
 
 
-  <!-- ARCHIVOS OCULTOS -->
+<!-- ARCHIVOS -->
 
-  <input
+<input
     id="fileA"
     type="file"
     accept="audio/*,video/*"
     hidden>
 
-  <input
+<input
     id="fileB"
     type="file"
     accept="audio/*,video/*"
     hidden>
 
-  <input
+<input
     id="musicFiles"
     type="file"
     accept="audio/*,video/*"
     multiple
     hidden>
 
-  <input
+<input
     id="voiceFile"
     type="file"
     accept="audio/*"
     hidden>
 
 
-  <!-- REPRODUCTORES -->
+<!-- AUDIO -->
 
-  <audio
+<audio
     id="audioA"
     preload="metadata">
-  </audio>
+</audio>
 
-  <audio
+<audio
     id="audioB"
     preload="metadata">
-  </audio>
+</audio>
 
 
-  <script src="dj.js"></script>
+<script src="dj.js"></script>
 
 </body>
 </html>
