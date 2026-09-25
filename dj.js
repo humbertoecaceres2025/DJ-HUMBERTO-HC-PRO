@@ -1,2861 +1,2550 @@
+/* =========================================================
+   DJ HUMBERTO — HC PRO
+   PROFESSIONAL DJ ENGINE
+   CROSS FADER + AUTO MIX + MP3 VISUALIZER + MP4 VIDEO
+========================================================= */
+
 "use strict";
 
-/* =====================================================
-   DJ HUMBERTO 3.3 PRO
-===================================================== */
+/* =========================================================
+   ESTADO GLOBAL
+========================================================= */
 
-const $ = id => document.getElementById(id);
+const state = {
 
-const STATE = {
+  audioContext: null,
 
-    started:false,
+  masterGain: null,
+  compressor: null,
+  analyser: null,
+  recordDestination: null,
 
-    audio:null,
+  recorder: null,
+  recordChunks: [],
 
-    master:null,
+  started: false,
 
-    analyser:null,
+  activeDeck: "A",
 
-    recordDestination:null,
+  autoMix: false,
+  autoMixTimer: null,
+  autoMixCountdownTimer: null,
+  autoMixSeconds: 10,
 
-    recorder:null,
+  crossfadeSeconds: 4,
 
-    recordingChunks:[],
+  smartAuto: false,
 
-    micStream:null,
+  library: [],
 
-    autoMix:false,
+  voiceFiles: [],
+  voiceEnabled: false,
+  voiceTimer: null,
+  voiceInterval: 10,
+  voiceVolume: 0.8,
 
-    autoVoice:false,
+  micStream: null,
+  micGain: null,
 
-    mixTimer:null,
-
-    voiceTimer:null,
-
-    voiceMinutes:0,
-
-    voiceBuffer:null,
-
-    activeDeck:"A",
-
-    library:[],
-
-    decks:{}
-
+  decks: {
+    A: null,
+    B: null
+  }
 };
 
 
-/* =====================================================
-   UTILIDADES
-===================================================== */
+/* =========================================================
+   DOM
+========================================================= */
 
-function formatTime(seconds){
-
-    seconds = Math.max(
-        0,
-        Math.floor(seconds || 0)
-    );
-
-    const minutes =
-        Math.floor(seconds / 60);
-
-    const secs =
-        seconds % 60;
-
-    return (
-        String(minutes).padStart(2,"0")
-        + ":" +
-        String(secs).padStart(2,"0")
-    );
-}
+const $ = id => document.getElementById(id);
 
 
-function cleanName(filename){
+/* =========================================================
+   INICIO
+========================================================= */
 
-    return filename.replace(
-        /\.[^/.]+$/,
-        ""
-    );
+document.addEventListener("DOMContentLoaded", init);
+
+function init() {
+
+  bindButtons();
+  bindControls();
+  updateClock();
+
+  setInterval(updateClock, 1000);
+
+  drawIdleVisualizer();
+
+  setStatus("SISTEMA LISTO");
 
 }
 
 
-function random(min,max){
+/* =========================================================
+   AUDIO ENGINE
+========================================================= */
 
-    return Math.floor(
-        Math.random() *
-        (max-min+1)
-    ) + min;
+async function startEngine() {
 
-}
+  try {
 
+    if (!state.audioContext) {
 
-function escapeHTML(text){
+      const AudioContext =
+        window.AudioContext ||
+        window.webkitAudioContext;
 
-    return String(text).replace(
-        /[&<>"']/g,
-        char => ({
-            "&":"&amp;",
-            "<":"&lt;",
-            ">":"&gt;",
-            '"':"&quot;",
-            "'":"&#039;"
-        }[char])
-    );
+      state.audioContext = new AudioContext();
 
-}
+      state.masterGain =
+        state.audioContext.createGain();
 
+      state.compressor =
+        state.audioContext.createDynamicsCompressor();
 
-/* =====================================================
-   RELOJ
-===================================================== */
+      state.analyser =
+        state.audioContext.createAnalyser();
 
-function updateClock(){
+      state.recordDestination =
+        state.audioContext.createMediaStreamDestination();
 
-    try{
+      state.analyser.fftSize = 2048;
 
-        $("clock").textContent =
-            new Intl.DateTimeFormat(
-                "es-AR",
-                {
-                    hour:"2-digit",
-                    minute:"2-digit",
-                    second:"2-digit",
-                    hour12:false,
-                    timeZone:
-                        "America/Argentina/La_Rioja"
-                }
-            ).format(new Date());
+      state.masterGain.gain.value = .9;
 
-    }catch(error){
+      state.compressor.threshold.value = -10;
+      state.compressor.knee.value = 15;
+      state.compressor.ratio.value = 4;
+      state.compressor.attack.value = .003;
+      state.compressor.release.value = .2;
 
-        $("clock").textContent =
-            new Date().toLocaleTimeString(
-                "es-AR",
-                {
-                    hour12:false
-                }
-            );
+      state.masterGain
+        .connect(state.compressor);
+
+      state.compressor
+        .connect(state.analyser);
+
+      state.compressor
+        .connect(state.recordDestination);
+
+      state.analyser.connect(
+        state.audioContext.destination
+      );
+
+      createDeck("A");
+      createDeck("B");
+
+      createVoiceEngine();
 
     }
 
-}
-
-
-/* =====================================================
-   IMPULSE RESPONSE REVERB
-===================================================== */
-
-function createImpulse(){
-
-    const seconds = 1.3;
-
-    const length =
-        STATE.audio.sampleRate *
-        seconds;
-
-    const buffer =
-        STATE.audio.createBuffer(
-            2,
-            length,
-            STATE.audio.sampleRate
-        );
-
-    for(
-        let channel=0;
-        channel<2;
-        channel++
-    ){
-
-        const data =
-            buffer.getChannelData(
-                channel
-            );
-
-        for(
-            let i=0;
-            i<length;
-            i++
-        ){
-
-            data[i] =
-                (
-                    Math.random()*2-1
-                ) *
-                Math.pow(
-                    1-i/length,
-                    3
-                );
-
-        }
-
+    if (state.audioContext.state === "suspended") {
+      await state.audioContext.resume();
     }
 
-    return buffer;
+    state.started = true;
+
+    $("bootScreen").classList.add("hidden");
+
+    setStatus("AUDIO ENGINE ACTIVO");
+
+    animate();
+
+  } catch (error) {
+
+    console.error(error);
+
+    $("bootMessage").textContent =
+      "No se pudo activar el motor de audio: " +
+      error.message;
+
+    setStatus("ERROR DE AUDIO");
+
+  }
 
 }
 
 
-/* =====================================================
-   INICIAR
-===================================================== */
-
-async function startSystem(){
-
-    if(STATE.started){
-
-        return;
-
-    }
-
-    try{
-
-        const AudioContext =
-            window.AudioContext ||
-            window.webkitAudioContext;
-
-        if(!AudioContext){
-
-            throw new Error(
-                "Web Audio no disponible"
-            );
-
-        }
-
-        STATE.audio =
-            new AudioContext();
-
-
-        /* MASTER */
-
-        STATE.master =
-            STATE.audio.createGain();
-
-        STATE.master.gain.value =
-            .85;
-
-
-        /* ANALYSER */
-
-        STATE.analyser =
-            STATE.audio.createAnalyser();
-
-        STATE.analyser.fftSize =
-            1024;
-
-
-        /* RECORD */
-
-        STATE.recordDestination =
-            STATE.audio.createMediaStreamDestination();
-
-
-        STATE.master.connect(
-            STATE.analyser
-        );
-
-
-        STATE.analyser.connect(
-            STATE.audio.destination
-        );
-
-
-        STATE.master.connect(
-            STATE.recordDestination
-        );
-
-
-        /* DECKS */
-
-        createDeck("A");
-
-        createDeck("B");
-
-
-        await STATE.audio.resume();
-
-
-        STATE.started =
-            true;
-
-
-        $("systemStatus").textContent =
-            "● SYSTEM ONLINE";
-
-
-        $("bootMessage").textContent =
-            "Audio activado";
-
-
-        $("boot").style.display =
-            "none";
-
-
-        startVisualizer();
-
-
-    }catch(error){
-
-        console.error(error);
-
-        $("bootMessage").textContent =
-            "Pulsa nuevamente para activar el audio.";
-
-    }
-
-}
-
-
-/* =====================================================
+/* =========================================================
    CREAR DECK
-===================================================== */
+========================================================= */
 
-function createDeck(deckName){
+function createDeck(letter) {
 
-    const audioElement =
-        deckName === "A"
-            ? $("audioA")
-            : $("audioB");
+  const audio =
+    letter === "A"
+      ? $("audioA")
+      : $("audioB");
 
+  const source =
+    state.audioContext.createMediaElementSource(audio);
+
+  const inputGain =
+    state.audioContext.createGain();
+
+  const volumeGain =
+    state.audioContext.createGain();
+
+  const low =
+    state.audioContext.createBiquadFilter();
+
+  const mid =
+    state.audioContext.createBiquadFilter();
+
+  const high =
+    state.audioContext.createBiquadFilter();
+
+  const filter =
+    state.audioContext.createBiquadFilter();
+
+  const delay =
+    state.audioContext.createDelay(1);
+
+  const feedback =
+    state.audioContext.createGain();
+
+  const echoWet =
+    state.audioContext.createGain();
+
+  const flangerDelay =
+    state.audioContext.createDelay(.05);
+
+  const flangerWet =
+    state.audioContext.createGain();
+
+  const reverbDelay =
+    state.audioContext.createDelay(2);
+
+  const reverbWet =
+    state.audioContext.createGain();
+
+  const dry =
+    state.audioContext.createGain();
+
+  const deckGain =
+    state.audioContext.createGain();
+
+  /* EQ */
+
+  low.type = "lowshelf";
+  low.frequency.value = 180;
+
+  mid.type = "peaking";
+  mid.frequency.value = 1000;
+  mid.Q.value = 1;
+
+  high.type = "highshelf";
+  high.frequency.value = 5000;
+
+  /* FX */
+
+  filter.type = "lowpass";
+  filter.frequency.value = 18000;
+
+  delay.delayTime.value = .25;
+  feedback.gain.value = .25;
+
+  flangerDelay.delayTime.value = .008;
+
+  reverbDelay.delayTime.value = .35;
+
+  echoWet.gain.value = 0;
+  flangerWet.gain.value = 0;
+  reverbWet.gain.value = 0;
+
+  dry.gain.value = 1;
+
+  inputGain.gain.value = 1;
+  volumeGain.gain.value = 1;
+
+  /* =====================================================
+     AUDIO GRAPH
+
+     SOURCE
+       ↓
+     INPUT
+       ↓
+     EQ
+       ↓
+     FILTER
+       ↓
+     DRY / FX
+       ↓
+     DECK GAIN
+       ↓
+     MASTER
+  ====================================================== */
+
+  source.connect(inputGain);
+
+  inputGain.connect(low);
+  low.connect(mid);
+  mid.connect(high);
+  high.connect(filter);
+
+  /* DRY */
+
+  filter.connect(dry);
+  dry.connect(deckGain);
+
+  /* ECHO */
+
+  filter.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(echoWet);
+  echoWet.connect(deckGain);
+
+  /* FLANGER */
+
+  filter.connect(flangerDelay);
+  flangerDelay.connect(flangerWet);
+  flangerWet.connect(deckGain);
+
+  /* REVERB */
+
+  filter.connect(reverbDelay);
+  reverbDelay.connect(reverbWet);
+  reverbWet.connect(deckGain);
+
+  /* VOLUME */
+
+  deckGain.connect(volumeGain);
+
+  volumeGain.connect(state.masterGain);
+
+  /* Inicialmente sin crossfade */
+
+  deckGain.gain.value = 1;
+
+  state.decks[letter] = {
+
+    letter,
+    audio,
+    source,
+
+    inputGain,
+    volumeGain,
+
+    low,
+    mid,
+    high,
+
+    filter,
+
+    delay,
+    echoWet,
+
+    flangerDelay,
+    flangerWet,
+
+    reverbDelay,
+    reverbWet,
+
+    dry,
+    deckGain,
+
+    file: null,
+
+    effects: {
+      filter: false,
+      echo: false,
+      flanger: false,
+      reverb: false
+    }
+
+  };
+
+  audio.addEventListener(
+    "ended",
+    () => handleEnded(letter)
+  );
+
+  audio.addEventListener(
+    "play",
+    () => deckPlaying(letter)
+  );
+
+  audio.addEventListener(
+    "pause",
+    () => deckPaused(letter)
+  );
+
+}
+
+
+/* =========================================================
+   VOICE ENGINE
+========================================================= */
+
+function createVoiceEngine() {
+
+  const voiceAudio = $("voiceAudio");
+
+  const voiceSource =
+    state.audioContext.createMediaElementSource(
+      voiceAudio
+    );
+
+  const voiceGain =
+    state.audioContext.createGain();
+
+  voiceGain.gain.value = state.voiceVolume;
+
+  voiceSource.connect(voiceGain);
+  voiceGain.connect(state.masterGain);
+
+  state.voiceGain = voiceGain;
+
+}
+
+
+/* =========================================================
+   LOAD DECK
+========================================================= */
+
+function loadDeck(letter, file) {
+
+  if (!file) return;
+
+  ensureAudio();
+
+  const deck = state.decks[letter];
+
+  const url = URL.createObjectURL(file);
+
+  deck.audio.pause();
+
+  deck.audio.src = url;
+  deck.audio.load();
+
+  deck.file = file;
+
+  $(letter === "A" ? "trackA" : "trackB").textContent =
+    file.name;
+
+  $(letter === "A" ? "statusA" : "statusB").textContent =
+    "READY";
+
+  $("visualStatus").textContent =
+    "ARCHIVO CARGADO";
+
+  /* Si es MP4 */
+
+  if (isVideo(file)) {
+
+    showVideo(file);
+
+  } else {
+
+    showVisualizer();
+
+  }
+
+  updateScreenMode(file);
+
+}
+
+
+/* =========================================================
+   VIDEO MP4
+========================================================= */
+
+function isVideo(file) {
+
+  return (
+    file.type.startsWith("video/") ||
+    /\.(mp4|webm|ogg)$/i.test(file.name)
+  );
+
+}
+
+
+function showVideo(file) {
+
+  const video = $("videoScreen");
+
+  const url = URL.createObjectURL(file);
+
+  video.src = url;
+  video.muted = true;
+
+  video.classList.add("active");
+
+  $("visualizer").style.opacity = "0";
+
+  $("screenMode").textContent =
+    "VIDEO MP4";
+
+}
+
+
+function showVisualizer() {
+
+  const video = $("videoScreen");
+
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+
+  video.classList.remove("active");
+
+  $("visualizer").style.opacity = "1";
+
+  $("screenMode").textContent =
+    "AUDIO VISUALIZER";
+
+}
+
+
+/* =========================================================
+   PLAY
+========================================================= */
+
+async function playDeck(letter) {
+
+  ensureAudio();
+
+  const deck = state.decks[letter];
+
+  if (!deck || !deck.file) {
+
+    alert("Primero cargá un archivo en Deck " + letter);
+    return;
+
+  }
+
+  try {
+
+    await deck.audio.play();
+
+    /* Si es MP4 */
+
+    if (isVideo(deck.file)) {
+
+      const video =
+        $("videoScreen");
+
+      if (video.src) {
+
+        try {
+          await video.play();
+        } catch (e) {}
+
+      }
+
+    }
+
+    updateCrossfade();
+
+    scheduleAutoMix();
+
+  } catch (error) {
+
+    console.error(error);
+
+    setStatus(
+      "EL NAVEGADOR BLOQUEÓ EL AUDIO"
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   STOP
+========================================================= */
+
+function stopDeck(letter) {
+
+  const deck = state.decks[letter];
+
+  if (!deck) return;
+
+  deck.audio.pause();
+  deck.audio.currentTime = 0;
+
+  if (
+    deck.file &&
+    isVideo(deck.file)
+  ) {
+
+    $("videoScreen").pause();
+    $("videoScreen").currentTime = 0;
+
+  }
+
+  $(letter === "A" ? "statusA" : "statusB")
+    .textContent = "STOP";
+
+  $(letter === "A" ? "recordA" : "recordB")
+    .classList.remove("playing");
+
+}
+
+
+/* =========================================================
+   ENDED
+========================================================= */
+
+function handleEnded(letter) {
+
+  const deck = state.decks[letter];
+
+  $(letter === "A" ? "statusA" : "statusB")
+    .textContent = "END";
+
+  $(letter === "A" ? "recordA" : "recordB")
+    .classList.remove("playing");
+
+  if (state.autoMix) {
+
+    transitionToOtherDeck(letter);
+
+  }
+
+}
+
+
+/* =========================================================
+   PLAY / PAUSE VISUAL
+========================================================= */
+
+function deckPlaying(letter) {
+
+  $(letter === "A" ? "statusA" : "statusB")
+    .textContent = "PLAY";
+
+  $(letter === "A" ? "recordA" : "recordB")
+    .classList.add("playing");
+
+  $("media-screen")?.classList.add("playing");
+
+  $("visualStatus").textContent =
+    "LIVE PLAYBACK";
+
+}
+
+
+function deckPaused(letter) {
+
+  $(letter === "A" ? "statusA" : "statusB")
+    .textContent = "PAUSE";
+
+  $(letter === "A" ? "recordA" : "recordB")
+    .classList.remove("playing");
+
+}
+
+
+/* =========================================================
+   CROSS FADER
+   CURVA PROFESIONAL
+========================================================= */
+
+function updateCrossfade() {
+
+  if (!state.decks.A || !state.decks.B)
+    return;
+
+  const x =
+    parseFloat(
+      $("crossfader").value
+    );
+
+  /*
+     Equal Power Crossfade
+
+     A = cos(x * PI/2)
+     B = sin(x * PI/2)
+
+     Esto evita el agujero de volumen
+     en el centro del crossfader.
+  */
+
+  const gainA =
+    Math.cos(x * Math.PI / 2);
+
+  const gainB =
+    Math.sin(x * Math.PI / 2);
+
+  const now =
+    state.audioContext.currentTime;
+
+  state.decks.A.deckGain.gain.cancelScheduledValues(now);
+  state.decks.B.deckGain.gain.cancelScheduledValues(now);
+
+  state.decks.A.deckGain.gain.setTargetAtTime(
+    gainA,
+    now,
+    .015
+  );
+
+  state.decks.B.deckGain.gain.setTargetAtTime(
+    gainB,
+    now,
+    .015
+  );
+
+  updateCrossValue(x);
+
+}
+
+
+function updateCrossValue(x) {
+
+  let text = "CENTER";
+
+  if (x < .08) {
+    text = "A FULL";
+  } else if (x < .45) {
+    text = "A →";
+  } else if (x > .92) {
+    text = "B FULL";
+  } else if (x > .55) {
+    text = "→ B";
+  }
+
+  $("crossValue").textContent = text;
+
+}
+
+
+/* =========================================================
+   TRANSICIÓN AUTOMÁTICA
+========================================================= */
+
+function transitionToOtherDeck(fromLetter) {
+
+  const toLetter =
+    fromLetter === "A" ? "B" : "A";
+
+  const from =
+    state.decks[fromLetter];
+
+  const to =
+    state.decks[toLetter];
+
+  if (!to || !to.file) {
+
+    smartLoadNext(toLetter);
+
+    return;
+
+  }
+
+  if (!from || !from.audio.paused) {
+
+    crossfade(fromLetter, toLetter);
+
+  } else {
+
+    state.activeDeck = toLetter;
+
+    playDeck(toLetter);
+
+  }
+
+}
+
+
+/* =========================================================
+   CROSSFADE AUTOMÁTICO
+========================================================= */
+
+async function crossfade(fromLetter, toLetter) {
+
+  const from =
+    state.decks[fromLetter];
+
+  const to =
+    state.decks[toLetter];
+
+  if (!from || !to || !to.file)
+    return;
+
+  ensureAudio();
+
+  const duration =
+    Math.max(
+      .5,
+      Number(
+        $("crossfadeDuration").value
+      )
+    );
+
+  try {
+
+    await to.audio.play();
+
+    const now =
+      state.audioContext.currentTime;
+
+    const a =
+      Math.cos(.5 * Math.PI / 2);
+
+    const b =
+      Math.sin(.5 * Math.PI / 2);
+
+    /* Arrancar B silencioso */
+
+    to.deckGain.gain.cancelScheduledValues(now);
+
+    from.deckGain.gain.cancelScheduledValues(now);
+
+    to.deckGain.gain.setValueAtTime(
+      0,
+      now
+    );
+
+    from.deckGain.gain.setValueAtTime(
+      1,
+      now
+    );
+
+    /*
+       Equal-power crossfade
+    */
+
+    from.deckGain.gain.exponentialRampToValueAtTime(
+      .001,
+      now + duration
+    );
+
+    to.deckGain.gain.linearRampToValueAtTime(
+      1,
+      now + duration
+    );
+
+    setTimeout(() => {
+
+      from.audio.pause();
+      from.audio.currentTime = 0;
+
+      /*
+         Dejar la deck nueva en 1
+         y la anterior en 0.
+      */
+
+      const t =
+        state.audioContext.currentTime;
+
+      from.deckGain.gain.cancelScheduledValues(t);
+      from.deckGain.gain.setValueAtTime(0, t);
+
+      to.deckGain.gain.cancelScheduledValues(t);
+      to.deckGain.gain.setValueAtTime(1, t);
+
+      state.activeDeck = toLetter;
+
+      /*
+         Importante:
+         sincronizamos el crossfader
+         con la deck activa.
+      */
+
+      if (toLetter === "A") {
+
+        $("crossfader").value = 0;
+
+      } else {
+
+        $("crossfader").value = 1;
+
+      }
+
+      updateCrossValue(
+        Number($("crossfader").value)
+      );
+
+      scheduleAutoMix();
+
+    }, duration * 1000 + 100);
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+
+}
+
+
+/* =========================================================
+   AUTO MIX
+========================================================= */
+
+function toggleAutoMix() {
+
+  state.autoMix =
+    !state.autoMix;
+
+  const button =
+    $("autoMixButton");
+
+  if (state.autoMix) {
+
+    button.textContent =
+      "AUTO MIX: ON";
+
+    button.classList.add("active");
+
+    state.autoMixSeconds =
+      Number(
+        $("autoMixInterval").value
+      );
+
+    scheduleAutoMix();
+
+  } else {
+
+    button.textContent =
+      "AUTO MIX: OFF";
+
+    button.classList.remove("active");
+
+    clearAutoMix();
+
+  }
+
+}
+
+
+function scheduleAutoMix() {
+
+  clearAutoMix();
+
+  if (!state.autoMix)
+    return;
+
+  const active =
+    state.decks[state.activeDeck];
+
+  if (!active || active.audio.paused)
+    return;
+
+  state.autoMixSeconds =
+    Number(
+      $("autoMixInterval").value
+    );
+
+  $("autoCountdown").textContent =
+    state.autoMixSeconds + "s";
+
+  state.autoMixCountdownTimer =
+    setInterval(() => {
+
+      state.autoMixSeconds--;
+
+      $("autoCountdown").textContent =
+        Math.max(
+          0,
+          state.autoMixSeconds
+        ) + "s";
+
+      if (state.autoMixSeconds <= 0) {
+
+        clearInterval(
+          state.autoMixCountdownTimer
+        );
+
+      }
+
+    }, 1000);
+
+  state.autoMixTimer =
+    setTimeout(() => {
+
+      const from =
+        state.activeDeck;
+
+      const to =
+        from === "A" ? "B" : "A";
+
+      if (!state.decks[to].file) {
+
+        smartLoadNext(to);
+
+      }
+
+      if (state.decks[to].file) {
+
+        crossfade(from, to);
+
+      }
+
+    }, Number($("autoMixInterval").value) * 1000);
+
+}
+
+
+function clearAutoMix() {
+
+  clearTimeout(
+    state.autoMixTimer
+  );
+
+  clearInterval(
+    state.autoMixCountdownTimer
+  );
+
+  state.autoMixTimer = null;
+  state.autoMixCountdownTimer = null;
+
+  $("autoCountdown").textContent =
+    "--";
+
+}
+
+
+/* =========================================================
+   SMART NEXT
+========================================================= */
+
+function smartLoadNext(letter) {
+
+  if (!state.library.length)
+    return;
+
+  const activeFile =
+    state.decks[state.activeDeck]?.file;
+
+  const candidates =
+    state.library.filter(
+      item => item.file !== activeFile
+    );
+
+  if (!candidates.length)
+    return;
+
+  const item =
+    candidates[
+      Math.floor(
+        Math.random() * candidates.length
+      )
+    ];
+
+  loadDeck(letter, item.file);
+
+}
+
+
+/* =========================================================
+   SMART AUTO
+========================================================= */
+
+function toggleSmartAuto() {
+
+  state.smartAuto =
+    !state.smartAuto;
+
+  const button =
+    $("smartAuto");
+
+  button.textContent =
+    state.smartAuto
+      ? "SMART AUTO: ON"
+      : "SMART AUTO: OFF";
+
+  button.classList.toggle(
+    "active",
+    state.smartAuto
+  );
+
+  if (state.smartAuto) {
+
+    const other =
+      state.activeDeck === "A"
+        ? "B"
+        : "A";
+
+    if (!state.decks[other].file) {
+      smartLoadNext(other);
+    }
+
+  }
+
+}
+
+
+/* =========================================================
+   EFFECTS INDIVIDUALES
+========================================================= */
+
+function toggleEffect(letter, effect) {
+
+  const deck =
+    state.decks[letter];
+
+  if (!deck)
+    return;
+
+  deck.effects[effect] =
+    !deck.effects[effect];
+
+  const active =
+    deck.effects[effect];
+
+  switch (effect) {
+
+    case "filter":
+
+      deck.filter.frequency.value =
+        active ? 850 : 18000;
+
+      break;
+
+    case "echo":
+
+      deck.echoWet.gain.value =
+        active ? .35 : 0;
+
+      break;
+
+    case "flanger":
+
+      deck.flangerWet.gain.value =
+        active ? .25 : 0;
+
+      break;
+
+    case "reverb":
+
+      deck.reverbWet.gain.value =
+        active ? .25 : 0;
+
+      break;
+
+  }
+
+  document
+    .querySelectorAll(
+      `[data-deck="${letter}"][data-effect="${effect}"]`
+    )
+    .forEach(btn => {
+
+      btn.classList.toggle(
+        "active",
+        active
+      );
+
+    });
+
+}
+
+
+/* =========================================================
+   EQ
+========================================================= */
+
+function setEQ(letter, band, value) {
+
+  const deck =
+    state.decks[letter];
+
+  if (!deck)
+    return;
+
+  const v =
+    Number(value);
+
+  if (band === "low")
+    deck.low.gain.value = v;
+
+  if (band === "mid")
+    deck.mid.gain.value = v;
+
+  if (band === "high")
+    deck.high.gain.value = v;
+
+}
+
+
+/* =========================================================
+   VOLUME
+========================================================= */
+
+function setDeckVolume(letter, value) {
+
+  const deck =
+    state.decks[letter];
+
+  if (!deck)
+    return;
+
+  deck.volumeGain.gain.value =
+    Number(value);
+
+}
+
+
+/* =========================================================
+   PITCH
+========================================================= */
+
+function setPitch(letter, value) {
+
+  const deck =
+    state.decks[letter];
+
+  if (!deck)
+    return;
+
+  deck.audio.playbackRate =
+    Number(value);
+
+  $(
+    letter === "A"
+      ? "pitchValueA"
+      : "pitchValueB"
+  ).textContent =
+    Number(value).toFixed(2) + "x";
+
+}
+
+
+/* =========================================================
+   MASTER
+========================================================= */
+
+function setMaster(value) {
+
+  if (!state.masterGain)
+    return;
+
+  state.masterGain.gain.value =
+    Number(value);
+
+  $("masterValue").textContent =
+    Math.round(Number(value) * 100) + "%";
+
+}
+
+
+/* =========================================================
+   LIBRARY
+========================================================= */
+
+function addLibrary(files) {
+
+  [...files].forEach(file => {
+
+    const exists =
+      state.library.some(
+        item => item.file.name === file.name &&
+                item.file.size === file.size
+      );
+
+    if (!exists) {
+
+      state.library.push({
+        file
+      });
+
+    }
+
+  });
+
+  renderLibrary();
+
+}
+
+
+function renderLibrary() {
+
+  const list =
+    $("libraryList");
+
+  list.innerHTML = "";
+
+  if (!state.library.length) {
+
+    list.innerHTML =
+      `<div class="empty-library">
+        No hay archivos cargados.
+      </div>`;
+
+    return;
+
+  }
+
+  state.library.forEach(
+    (item, index) => {
+
+      const row =
+        document.createElement("div");
+
+      row.className =
+        "library-item";
+
+      const name =
+        document.createElement("div");
+
+      name.className =
+        "library-name";
+
+      name.textContent =
+        item.file.name;
+
+      const btnA =
+        document.createElement("button");
+
+      btnA.textContent =
+        "A";
+
+      btnA.onclick = () =>
+        loadDeck("A", item.file);
+
+      const btnB =
+        document.createElement("button");
+
+      btnB.textContent =
+        "B";
+
+      btnB.onclick = () =>
+        loadDeck("B", item.file);
+
+      row.append(
+        name,
+        btnA,
+        btnB
+      );
+
+      list.appendChild(row);
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   VOICE ID
+========================================================= */
+
+function loadVoiceFiles(files) {
+
+  state.voiceFiles =
+    [...files];
+
+  $("voiceStatus").textContent =
+    state.voiceFiles.length +
+    " VOICE ID CARGADOS";
+
+}
+
+
+function toggleVoice() {
+
+  state.voiceEnabled =
+    !state.voiceEnabled;
+
+  $("voiceButton").textContent =
+    state.voiceEnabled
+      ? "VOICE ID: ON"
+      : "VOICE ID: OFF";
+
+  $("voiceButton").classList.toggle(
+    "active",
+    state.voiceEnabled
+  );
+
+  clearTimeout(
+    state.voiceTimer
+  );
+
+  if (state.voiceEnabled) {
+
+    state.voiceInterval =
+      Number(
+        $("voiceInterval").value
+      );
+
+    scheduleVoice();
+
+  }
+
+}
+
+
+function scheduleVoice() {
+
+  if (!state.voiceEnabled)
+    return;
+
+  const minutes =
+    Number(
+      $("voiceInterval").value
+    );
+
+  state.voiceTimer =
+    setTimeout(() => {
+
+      playVoiceID();
+
+      scheduleVoice();
+
+    }, minutes * 60 * 1000);
+
+}
+
+
+async function playVoiceID() {
+
+  if (!state.voiceFiles.length)
+    return;
+
+  const file =
+    state.voiceFiles[
+      Math.floor(
+        Math.random() *
+        state.voiceFiles.length
+      )
+    ];
+
+  const url =
+    URL.createObjectURL(file);
+
+  const audio =
+    $("voiceAudio");
+
+  audio.src = url;
+
+  audio.volume =
+    Number(
+      $("voiceVolume").value
+    );
+
+  /*
+     Ducking profesional
+  */
+
+  const original =
+    state.masterGain.gain.value;
+
+  if (state.masterGain) {
+
+    const now =
+      state.audioContext.currentTime;
+
+    state.masterGain.gain.cancelScheduledValues(now);
+
+    state.masterGain.gain.setTargetAtTime(
+      original * .35,
+      now,
+      .05
+    );
+
+  }
+
+  try {
+
+    await audio.play();
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+
+  audio.onended = () => {
+
+    if (state.masterGain) {
+
+      const now =
+        state.audioContext.currentTime;
+
+      state.masterGain.gain.setTargetAtTime(
+        Number($("masterVolume").value),
+        now,
+        .15
+      );
+
+    }
+
+    URL.revokeObjectURL(url);
+
+  };
+
+}
+
+
+/* =========================================================
+   MIC
+========================================================= */
+
+async function toggleMic() {
+
+  if (state.micStream) {
+
+    state.micStream
+      .getTracks()
+      .forEach(track => track.stop());
+
+    state.micStream = null;
+
+    $("micButton").textContent =
+      "🎙 MIC";
+
+    return;
+
+  }
+
+  try {
+
+    const stream =
+      await navigator.mediaDevices
+        .getUserMedia({
+          audio: true
+        });
+
+    state.micStream =
+      stream;
 
     const source =
-        STATE.audio.createMediaElementSource(
-            audioElement
+      state.audioContext
+        .createMediaStreamSource(stream);
+
+    state.micGain =
+      state.audioContext.createGain();
+
+    state.micGain.gain.value =
+      .8;
+
+    source.connect(
+      state.micGain
+    );
+
+    state.micGain.connect(
+      state.masterGain
+    );
+
+    $("micButton").textContent =
+      "🎙 MIC ON";
+
+  } catch (error) {
+
+    alert(
+      "No se pudo activar el micrófono."
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   GRABACIÓN
+========================================================= */
+
+function toggleRecording() {
+
+  if (!state.recordDestination)
+    return;
+
+  if (
+    state.recorder &&
+    state.recorder.state === "recording"
+  ) {
+
+    stopRecording();
+    return;
+
+  }
+
+  startRecording();
+
+}
+
+
+function startRecording() {
+
+  state.recordChunks = [];
+
+  let options = {};
+
+  if (
+    MediaRecorder.isTypeSupported(
+      "audio/webm;codecs=opus"
+    )
+  ) {
+
+    options.mimeType =
+      "audio/webm;codecs=opus";
+
+  }
+
+  state.recorder =
+    new MediaRecorder(
+      state.recordDestination.stream,
+      options
+    );
+
+  state.recorder.ondataavailable =
+    event => {
+
+      if (event.data.size > 0) {
+        state.recordChunks.push(
+          event.data
         );
-
-
-    const input =
-        STATE.audio.createGain();
-
-
-    /* EQ */
-
-    const low =
-        STATE.audio.createBiquadFilter();
-
-    low.type =
-        "lowshelf";
-
-    low.frequency.value =
-        180;
-
-
-    const mid =
-        STATE.audio.createBiquadFilter();
-
-    mid.type =
-        "peaking";
-
-    mid.frequency.value =
-        1000;
-
-    mid.Q.value =
-        1;
-
-
-    const high =
-        STATE.audio.createBiquadFilter();
-
-    high.type =
-        "highshelf";
-
-    high.frequency.value =
-        4500;
-
-
-    /* FILTER */
-
-    const filter =
-        STATE.audio.createBiquadFilter();
-
-    filter.type =
-        "lowpass";
-
-    filter.frequency.value =
-        20000;
-
-
-    /* ECHO */
-
-    const delay =
-        STATE.audio.createDelay(2);
-
-    delay.delayTime.value =
-        .25;
-
-
-    const feedback =
-        STATE.audio.createGain();
-
-    feedback.gain.value =
-        0;
-
-
-    const echoWet =
-        STATE.audio.createGain();
-
-    echoWet.gain.value =
-        0;
-
-
-    /* REVERB */
-
-    const reverb =
-        STATE.audio.createConvolver();
-
-    reverb.buffer =
-        createImpulse();
-
-
-    const reverbWet =
-        STATE.audio.createGain();
-
-    reverbWet.gain.value =
-        0;
-
-
-    /* FLANGER */
-
-    const flanger =
-        STATE.audio.createDelay();
-
-    flanger.delayTime.value =
-        .012;
-
-
-    const flangerWet =
-        STATE.audio.createGain();
-
-    flangerWet.gain.value =
-        0;
-
-
-    /* CADENA PRINCIPAL */
-
-    source
-        .connect(low)
-        .connect(mid)
-        .connect(high)
-        .connect(input)
-        .connect(filter);
-
-
-    filter.connect(
-        STATE.master
-    );
-
-
-    /* ECHO */
-
-    filter.connect(
-        delay
-    );
-
-    delay.connect(
-        feedback
-    );
-
-    feedback.connect(
-        delay
-    );
-
-    delay.connect(
-        echoWet
-    );
-
-    echoWet.connect(
-        STATE.master
-    );
-
-
-    /* REVERB */
-
-    filter.connect(
-        reverb
-    );
-
-    reverb.connect(
-        reverbWet
-    );
-
-    reverbWet.connect(
-        STATE.master
-    );
-
-
-    /* FLANGER */
-
-    filter.connect(
-        flanger
-    );
-
-    flanger.connect(
-        flangerWet
-    );
-
-    flangerWet.connect(
-        STATE.master
-    );
-
-
-    STATE.decks[deckName] = {
-
-        audio:audioElement,
-
-        source,
-
-        input,
-
-        low,
-
-        mid,
-
-        high,
-
-        filter,
-
-        delay,
-
-        feedback,
-
-        echoWet,
-
-        reverb,
-
-        reverbWet,
-
-        flanger,
-
-        flangerWet,
-
-        file:null,
-
-        url:null,
-
-        bpm:null,
-
-        key:null,
-
-        energy:null,
-
-        effects:{
-            filter:false,
-            echo:false,
-            reverb:false,
-            flanger:false
-        }
+      }
 
     };
 
+  state.recorder.onstop =
+    saveRecording;
 
-    audioElement.addEventListener(
-        "play",
-        () => {
+  state.recorder.start();
 
-            setDeckPlaying(
-                deckName,
-                true
-            );
+  $("recordButton").textContent =
+    "■ STOP REC";
 
-            STATE.activeDeck =
-                deckName;
+  $("recordingStatus").textContent =
+    "● GRABANDO";
 
-            updateNowPlaying(
-                deckName
-            );
-
-        }
-    );
-
-
-    audioElement.addEventListener(
-        "pause",
-        () => {
-
-            setDeckPlaying(
-                deckName,
-                false
-            );
-
-        }
-    );
-
-
-    audioElement.addEventListener(
-        "timeupdate",
-        () => {
-
-            updateTime(
-                deckName
-            );
-
-        }
-    );
-
-
-    audioElement.addEventListener(
-        "ended",
-        () => {
-
-            setDeckPlaying(
-                deckName,
-                false
-            );
-
-        }
-    );
+  $("recordingStatus")
+    .classList.add("recording");
 
 }
 
 
-/* =====================================================
-   CARGAR PISTA
-===================================================== */
+function stopRecording() {
 
-function loadTrack(
-    file,
-    deckName
-){
+  if (!state.recorder)
+    return;
 
-    if(!file){
+  state.recorder.stop();
 
-        return;
+  $("recordButton").textContent =
+    "● REC";
 
-    }
+  $("recordingStatus").textContent =
+    "REC: PROCESANDO";
 
+  $("recordingStatus")
+    .classList.remove("recording");
 
-    if(!STATE.started){
-
-        $("bootMessage").textContent =
-            "Pulsa INICIAR DJ HUMBERTO primero.";
-
-        return;
-
-    }
+}
 
 
-    const deck =
-        STATE.decks[deckName];
+function saveRecording() {
 
-
-    if(!deck){
-
-        return;
-
-    }
-
-
-    if(deck.url){
-
-        URL.revokeObjectURL(
-            deck.url
-        );
-
-    }
-
-
-    deck.url =
-        URL.createObjectURL(
-            file
-        );
-
-    deck.file =
-        file;
-
-    deck.audio.src =
-        deck.url;
-
-    deck.audio.load();
-
-
-    /* DATOS DJ */
-
-    deck.bpm =
-        random(90,150);
-
-    const keys = [
-        "Am",
-        "Bm",
-        "Cm",
-        "Dm",
-        "Em",
-        "Fm",
-        "Gm",
-        "C",
-        "D",
-        "E",
-        "F",
-        "G"
-    ];
-
-    deck.key =
-        keys[
-            random(
-                0,
-                keys.length-1
-            )
-        ];
-
-    deck.energy =
-        random(40,100);
-
-
-    $("title"+deckName)
-        .textContent =
-        cleanName(file.name);
-
-
-    $("info"+deckName)
-        .textContent =
-        `BPM ${deck.bpm} • KEY ${deck.key} • ENERGY ${deck.energy}%`;
-
-
-    $("deckStatus"+deckName)
-        .textContent =
-        "LOADED";
-
-
-    updateSmart(
-        deckName
+  const blob =
+    new Blob(
+      state.recordChunks,
+      {
+        type: "audio/webm"
+      }
     );
 
-}
+  const url =
+    URL.createObjectURL(blob);
 
+  const a =
+    document.createElement("a");
 
-/* =====================================================
-   PLAY
-===================================================== */
+  a.href = url;
+  a.download =
+    "DJ-HUMBERTO-HC-PRO-" +
+    Date.now() +
+    ".webm";
 
-async function playDeck(
-    deckName
-){
+  a.click();
 
-    const deck =
-        STATE.decks[deckName];
+  setTimeout(
+    () => URL.revokeObjectURL(url),
+    1000
+  );
 
-
-    if(
-        !deck ||
-        !deck.file
-    ){
-
-        $("bootMessage").textContent =
-            "Carga una pista primero.";
-
-        return;
-
-    }
-
-
-    try{
-
-        await STATE.audio.resume();
-
-        await deck.audio.play();
-
-        STATE.activeDeck =
-            deckName;
-
-    }catch(error){
-
-        console.error(error);
-
-    }
+  $("recordingStatus").textContent =
+    "REC: GUARDADO";
 
 }
 
 
-/* =====================================================
-   STOP
-===================================================== */
+/* =========================================================
+   STOP ALL
+========================================================= */
 
-function stopDeck(
-    deckName
-){
+function stopAll() {
 
-    const deck =
-        STATE.decks[deckName];
+  ["A", "B"].forEach(
+    letter => stopDeck(letter)
+  );
 
+  clearAutoMix();
 
-    if(!deck){
+  state.autoMix = false;
 
-        return;
+  $("autoMixButton").textContent =
+    "AUTO MIX: OFF";
 
-    }
+  $("autoMixButton")
+    .classList.remove("active");
 
-
-    deck.audio.pause();
-
-    deck.audio.currentTime =
-        0;
+  $("autoCountdown").textContent =
+    "--";
 
 }
 
 
-/* =====================================================
-   ESTADO DECK
-===================================================== */
+/* =========================================================
+   VISUALIZADOR
+========================================================= */
 
-function setDeckPlaying(
-    deckName,
-    playing
-){
+function animate() {
 
-    const deck =
-        $("deck"+deckName);
+  requestAnimationFrame(animate);
 
-    deck.classList.toggle(
-        "playing",
-        playing
+  if (
+    !state.analyser ||
+    !state.started
+  ) {
+
+    drawIdleVisualizer();
+    return;
+
+  }
+
+  const analyser =
+    state.analyser;
+
+  const canvas =
+    $("visualizer");
+
+  const ctx =
+    canvas.getContext("2d");
+
+  const rect =
+    canvas.getBoundingClientRect();
+
+  if (
+    canvas.width !== Math.floor(rect.width * devicePixelRatio) ||
+    canvas.height !== Math.floor(rect.height * devicePixelRatio)
+  ) {
+
+    canvas.width =
+      Math.floor(rect.width * devicePixelRatio);
+
+    canvas.height =
+      Math.floor(rect.height * devicePixelRatio);
+
+    ctx.setTransform(
+      devicePixelRatio,
+      0,
+      0,
+      devicePixelRatio,
+      0,
+      0
     );
 
+  }
 
-    $("deckStatus"+deckName)
-        .textContent =
-        playing
-            ? "PLAYING"
-            : "READY";
+  const width =
+    rect.width;
 
-}
+  const height =
+    rect.height;
 
-
-/* =====================================================
-   NOW PLAYING
-===================================================== */
-
-function updateNowPlaying(
-    deckName
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    if(
-        !deck ||
-        !deck.file
-    ){
-
-        return;
-
-    }
-
-
-    $("nowPlaying")
-        .textContent =
-        cleanName(
-            deck.file.name
-        );
-
-
-    $("nowInfo")
-        .textContent =
-        `DECK ${deckName} • ${deck.bpm} BPM • ${deck.key}`;
-
-
-    updateSmart(
-        deckName
+  const buffer =
+    new Uint8Array(
+      analyser.frequencyBinCount
     );
 
-}
+  analyser.getByteFrequencyData(
+    buffer
+  );
 
+  ctx.clearRect(
+    0,
+    0,
+    width,
+    height
+  );
 
-/* =====================================================
-   TIME
-===================================================== */
+  /* Fondo */
 
-function updateTime(
-    deckName
-){
+  const gradient =
+    ctx.createRadialGradient(
+      width / 2,
+      height / 2,
+      10,
+      width / 2,
+      height / 2,
+      width
+    );
 
-    const deck =
-        STATE.decks[deckName];
+  gradient.addColorStop(
+    0,
+    "rgba(0,234,255,.12)"
+  );
 
+  gradient.addColorStop(
+    .45,
+    "rgba(70,40,180,.08)"
+  );
 
-    $("time"+deckName)
-        .textContent =
-        formatTime(
-            deck.audio.currentTime
-        );
+  gradient.addColorStop(
+    1,
+    "rgba(0,0,0,.8)"
+  );
 
+  ctx.fillStyle =
+    gradient;
 
-    if(
-        deck.audio.duration &&
-        Number.isFinite(
-            deck.audio.duration
-        )
-    ){
+  ctx.fillRect(
+    0,
+    0,
+    width,
+    height
+  );
 
-        $("seek"+deckName).value =
-            (
-                deck.audio.currentTime /
-                deck.audio.duration
-            ) * 100;
+  /* BARRAS */
 
-    }
+  const bars = 100;
+  const step =
+    Math.floor(
+      buffer.length / bars
+    );
 
-}
+  const barWidth =
+    width / bars;
 
+  let total = 0;
 
-/* =====================================================
-   VOLUMEN
-===================================================== */
-
-function updateVolume(
-    deckName
-){
+  for (
+    let i = 0;
+    i < bars;
+    i++
+  ) {
 
     const value =
-        Number(
-            $("volume"+deckName).value
-        );
+      buffer[i * step] || 0;
 
+    total += value;
 
-    $("volume"+deckName+"Value")
-        .textContent =
-        value + "%";
+    const h =
+      (value / 255) *
+      height *
+      .65;
 
+    const x =
+      i * barWidth;
 
-    updateCrossfader();
+    const y =
+      height / 2 - h / 2;
+
+    const hue =
+      180 +
+      (i / bars) * 150;
+
+    ctx.fillStyle =
+      `hsla(${hue},100%,60%,.75)`;
+
+    ctx.shadowBlur = 15;
+
+    ctx.shadowColor =
+      `hsla(${hue},100%,60%,.8)`;
+
+    ctx.fillRect(
+      x + 1,
+      y,
+      Math.max(1, barWidth - 2),
+      h
+    );
+
+  }
+
+  ctx.shadowBlur = 0;
+
+  updateMeters(total / bars);
+
+  drawMiniWave(buffer);
 
 }
 
 
-/* =====================================================
-   CROSS FADER
-===================================================== */
+/* =========================================================
+   MINI WAVE
+========================================================= */
 
-function updateCrossfader(){
+function drawMiniWave(buffer) {
 
-    if(
-        !STATE.decks.A ||
-        !STATE.decks.B
-    ){
+  const canvas =
+    $("miniWave");
 
-        return;
+  const rect =
+    canvas.getBoundingClientRect();
+
+  canvas.width =
+    Math.floor(rect.width * devicePixelRatio);
+
+  canvas.height =
+    Math.floor(rect.height * devicePixelRatio);
+
+  const ctx =
+    canvas.getContext("2d");
+
+  ctx.setTransform(
+    devicePixelRatio,
+    0,
+    0,
+    devicePixelRatio,
+    0,
+    0
+  );
+
+  const width =
+    rect.width;
+
+  const height =
+    rect.height;
+
+  ctx.clearRect(
+    0,
+    0,
+    width,
+    height
+  );
+
+  ctx.beginPath();
+
+  for (
+    let x = 0;
+    x < width;
+    x++
+  ) {
+
+    const index =
+      Math.floor(
+        x / width *
+        buffer.length
+      );
+
+    const value =
+      buffer[index] || 0;
+
+    const y =
+      height / 2 -
+      (value / 255) *
+      height / 2;
+
+    if (x === 0)
+      ctx.moveTo(x, y);
+    else
+      ctx.lineTo(x, y);
+
+  }
+
+  ctx.strokeStyle =
+    "#00eaff";
+
+  ctx.lineWidth = 1.5;
+
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = "#00eaff";
+
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+
+}
+
+
+/* =========================================================
+   IDLE VISUALIZER
+========================================================= */
+
+function drawIdleVisualizer() {
+
+  const canvas =
+    $("visualizer");
+
+  if (!canvas)
+    return;
+
+  const rect =
+    canvas.getBoundingClientRect();
+
+  if (!rect.width)
+    return;
+
+  canvas.width =
+    Math.floor(rect.width * devicePixelRatio);
+
+  canvas.height =
+    Math.floor(rect.height * devicePixelRatio);
+
+  const ctx =
+    canvas.getContext("2d");
+
+  ctx.setTransform(
+    devicePixelRatio,
+    0,
+    0,
+    devicePixelRatio,
+    0,
+    0
+  );
+
+  const width =
+    rect.width;
+
+  const height =
+    rect.height;
+
+  ctx.clearRect(
+    0,
+    0,
+    width,
+    height
+  );
+
+  const center =
+    height / 2;
+
+  ctx.beginPath();
+
+  for (
+    let x = 0;
+    x < width;
+    x += 3
+  ) {
+
+    const wave =
+      Math.sin(x * .035) * 8 +
+      Math.sin(x * .08) * 4;
+
+    const y =
+      center + wave;
+
+    if (x === 0)
+      ctx.moveTo(x, y);
+    else
+      ctx.lineTo(x, y);
+
+  }
+
+  ctx.strokeStyle =
+    "rgba(0,234,255,.45)";
+
+  ctx.lineWidth = 2;
+
+  ctx.stroke();
+
+}
+
+
+/* =========================================================
+   METERS
+========================================================= */
+
+function updateMeters(level) {
+
+  const normalized =
+    Math.min(
+      100,
+      Math.max(
+        0,
+        level / 1.8
+      )
+    );
+
+  const aPlaying =
+    state.decks.A &&
+    !state.decks.A.audio.paused;
+
+  const bPlaying =
+    state.decks.B &&
+    !state.decks.B.audio.paused;
+
+  $("vuA").style.width =
+    aPlaying
+      ? normalized + "%"
+      : "0%";
+
+  $("vuB").style.width =
+    bPlaying
+      ? normalized + "%"
+      : "0%";
+
+}
+
+
+/* =========================================================
+   CLOCK
+========================================================= */
+
+function updateClock() {
+
+  const now =
+    new Date();
+
+  $("clock").textContent =
+    now.toLocaleTimeString(
+      "es-AR",
+      {
+        hour12: false
+      }
+    );
+
+}
+
+
+/* =========================================================
+   SCREEN MODE
+========================================================= */
+
+function updateScreenMode(file) {
+
+  $("screenMode").textContent =
+    isVideo(file)
+      ? "VIDEO MP4"
+      : "AUDIO VISUALIZER";
+
+}
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+function setStatus(text) {
+
+  $("systemStatus").textContent =
+    text;
+
+}
+
+
+/* =========================================================
+   ENSURE AUDIO
+========================================================= */
+
+function ensureAudio() {
+
+  if (!state.started) {
+
+    startEngine();
+
+  }
+
+}
+
+
+/* =========================================================
+   EVENTOS
+========================================================= */
+
+function bindButtons() {
+
+  $("startEngine")
+    .addEventListener(
+      "click",
+      startEngine
+    );
+
+  $("loadA")
+    .addEventListener(
+      "click",
+      () => $("fileA").click()
+    );
+
+  $("loadB")
+    .addEventListener(
+      "click",
+      () => $("fileB").click()
+    );
+
+  $("fileA")
+    .addEventListener(
+      "change",
+      e => loadDeck(
+        "A",
+        e.target.files[0]
+      )
+    );
+
+  $("fileB")
+    .addEventListener(
+      "change",
+      e => loadDeck(
+        "B",
+        e.target.files[0]
+      )
+    );
+
+  $("playA")
+    .addEventListener(
+      "click",
+      () => playDeck("A")
+    );
+
+  $("playB")
+    .addEventListener(
+      "click",
+      () => playDeck("B")
+    );
+
+  $("stopA")
+    .addEventListener(
+      "click",
+      () => stopDeck("A")
+    );
+
+  $("stopB")
+    .addEventListener(
+      "click",
+      () => stopDeck("B")
+    );
+
+  $("autoMixButton")
+    .addEventListener(
+      "click",
+      toggleAutoMix
+    );
+
+  $("stopAll")
+    .addEventListener(
+      "click",
+      stopAll
+    );
+
+  $("recordButton")
+    .addEventListener(
+      "click",
+      toggleRecording
+    );
+
+  $("micButton")
+    .addEventListener(
+      "click",
+      toggleMic
+    );
+
+  $("libraryLoad")
+    .addEventListener(
+      "click",
+      () => $("libraryFiles").click()
+    );
+
+  $("libraryFiles")
+    .addEventListener(
+      "change",
+      e => addLibrary(
+        e.target.files
+      )
+    );
+
+  $("smartNext")
+    .addEventListener(
+      "click",
+      () => {
+
+        const other =
+          state.activeDeck === "A"
+            ? "B"
+            : "A";
+
+        smartLoadNext(other);
+
+      }
+    );
+
+  $("smartAuto")
+    .addEventListener(
+      "click",
+      toggleSmartAuto
+    );
+
+  $("voiceLoad")
+    .addEventListener(
+      "click",
+      () => $("voiceFiles").click()
+    );
+
+  $("voiceFiles")
+    .addEventListener(
+      "change",
+      e => loadVoiceFiles(
+        e.target.files
+      )
+    );
+
+  $("voiceButton")
+    .addEventListener(
+      "click",
+      toggleVoice
+    );
+
+}
+
+
+/* =========================================================
+   CONTROLES
+========================================================= */
+
+function bindControls() {
+
+  $("crossfader")
+    .addEventListener(
+      "input",
+      updateCrossfade
+    );
+
+  $("masterVolume")
+    .addEventListener(
+      "input",
+      e => setMaster(
+        e.target.value
+      )
+    );
+
+  ["A", "B"].forEach(letter => {
+
+    $("volume" + letter)
+      .addEventListener(
+        "input",
+        e => setDeckVolume(
+          letter,
+          e.target.value
+        )
+      );
+
+    $("pitch" + letter)
+      .addEventListener(
+        "input",
+        e => setPitch(
+          letter,
+          e.target.value
+        )
+      );
+
+    ["low", "mid", "high"].forEach(
+      band => {
+
+        $(band + letter)
+          .addEventListener(
+            "input",
+            e => setEQ(
+              letter,
+              band,
+              e.target.value
+            )
+          );
+
+      }
+    );
+
+  });
+
+
+  document
+    .querySelectorAll(
+      ".effects button"
+    )
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        () => toggleEffect(
+          button.dataset.deck,
+          button.dataset.effect
+        )
+      );
+
+    });
+
+
+  $("autoMixInterval")
+    .addEventListener(
+      "change",
+      () => {
+
+        if (state.autoMix) {
+          scheduleAutoMix();
+        }
+
+      }
+    );
+
+
+  $("crossfadeDuration")
+    .addEventListener(
+      "change",
+      () => {
+
+        const interval =
+          Number(
+            $("autoMixInterval").value
+          );
+
+        const duration =
+          Number(
+            $("crossfadeDuration").value
+          );
+
+        /*
+           Evita una duración de crossfade
+           mayor que el intervalo programado.
+        */
+
+        if (duration >= interval) {
+
+          const options =
+            [...$("crossfadeDuration").options];
+
+          const valid =
+            options.find(
+              option =>
+                Number(option.value) <
+                interval
+            );
+
+          if (valid) {
+
+            $("crossfadeDuration").value =
+              valid.value;
+
+          }
+
+        }
+
+      }
+    );
+
+
+  $("voiceVolume")
+    .addEventListener(
+      "input",
+      e => {
+
+        state.voiceVolume =
+          Number(e.target.value);
+
+        if (state.voiceGain) {
+
+          state.voiceGain.gain.value =
+            state.voiceVolume;
+
+        }
+
+      }
+    );
+
+
+  $("voiceInterval")
+    .addEventListener(
+      "change",
+      () => {
+
+        if (state.voiceEnabled) {
+
+          clearTimeout(
+            state.voiceTimer
+          );
+
+          scheduleVoice();
+
+        }
+
+      }
+    );
+
+}
+
+
+/* =========================================================
+   TECLADO
+========================================================= */
+
+document.addEventListener(
+  "keydown",
+  event => {
+
+    if (
+      event.target.tagName === "INPUT" ||
+      event.target.tagName === "SELECT"
+    ) return;
+
+    switch (event.code) {
+
+      case "Space":
+
+        event.preventDefault();
+
+        if (
+          state.decks[state.activeDeck]
+            ?.audio.paused
+        ) {
+
+          playDeck(
+            state.activeDeck
+          );
+
+        } else {
+
+          state.decks[state.activeDeck]
+            ?.audio.pause();
+
+        }
+
+        break;
+
+
+      case "KeyA":
+
+        state.activeDeck = "A";
+
+        break;
+
+
+      case "KeyB":
+
+        state.activeDeck = "B";
+
+        break;
+
+
+      case "KeyM":
+
+        toggleAutoMix();
+
+        break;
+
+
+      case "KeyR":
+
+        toggleRecording();
+
+        break;
 
     }
 
-
-    const cross =
-        Number(
-            $("crossfader").value
-        ) / 100;
+  }
+);
 
 
-    const volumeA =
-        Number(
-            $("volumeA").value
-        ) / 100;
+/* =========================================================
+   CORRECCIÓN IMPORTANTE:
+   EL VIDEO NO MUESTRA EL NOMBRE DE LA CANCIÓN
+========================================================= */
 
-
-    const volumeB =
-        Number(
-            $("volumeB").value
-        ) / 100;
-
+$("videoScreen").addEventListener(
+  "loadedmetadata",
+  () => {
 
     /*
-       Curva suave:
-       A = izquierda
-       B = derecha
+       El navegador solamente muestra
+       el contenido del video.
+       No agregamos ningún título
+       ni nombre del archivo.
     */
 
-    STATE.decks.A.input.gain.value =
-        Math.cos(
-            cross *
-            Math.PI /
-            2
-        ) *
-        volumeA;
-
-
-    STATE.decks.B.input.gain.value =
-        Math.sin(
-            cross *
-            Math.PI /
-            2
-        ) *
-        volumeB;
-
-
-    $("crossValue")
-        .textContent =
-        Math.round(
-            cross * 100
-        ) + "%";
-
-}
-
-
-/* =====================================================
-   PITCH
-===================================================== */
-
-function updatePitch(
-    deckName
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    const value =
-        Number(
-            $("pitch"+deckName).value
-        );
-
-
-    deck.audio.playbackRate =
-        1 + value / 100;
-
-
-    $("pitch"+deckName+"Value")
-        .textContent =
-        value + "%";
-
-}
-
-
-/* =====================================================
-   SEEK
-===================================================== */
-
-function updateSeek(
-    deckName
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    if(
-        !deck.audio.duration
-    ){
-
-        return;
-
-    }
-
-
-    deck.audio.currentTime =
-        deck.audio.duration *
-        Number(
-            $("seek"+deckName).value
-        ) / 100;
-
-}
-
-
-/* =====================================================
-   MASTER
-===================================================== */
-
-function updateMaster(){
-
-    const value =
-        Number(
-            $("master").value
-        );
-
-
-    STATE.master.gain.value =
-        value / 100;
-
-
-    $("masterValue")
-        .textContent =
-        value + "%";
-
-}
-
-
-/* =====================================================
-   EQ
-===================================================== */
-
-function updateEQ(){
-
-    ["A","B"].forEach(
-        deckName => {
-
-            const deck =
-                STATE.decks[deckName];
-
-            if(!deck){
-
-                return;
-
-            }
-
-
-            deck.low.gain.value =
-                Number(
-                    $("eqLow").value
-                );
-
-
-            deck.mid.gain.value =
-                Number(
-                    $("eqMid").value
-                );
-
-
-            deck.high.gain.value =
-                Number(
-                    $("eqHigh").value
-                );
-
-        }
-    );
-
-}
-
-
-/* =====================================================
-   EFECTOS INDIVIDUALES
-===================================================== */
-
-function toggleEffect(
-    deckName,
-    effect
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    if(!deck){
-
-        return;
-
-    }
-
-
-    deck.effects[effect] =
-        !deck.effects[effect];
-
-
-    const button =
-        document.querySelector(
-            `[data-deck="${deckName}"][data-effect="${effect}"]`
-        );
-
-
-    button.classList.toggle(
-        "active",
-        deck.effects[effect]
-    );
-
-
-    if(effect === "filter"){
-
-        deck.filter.frequency =
-            deck.effects.filter
-                ? 1200
-                : 20000;
-
-    }
-
-
-    if(effect === "echo"){
-
-        deck.echoWet.gain.value =
-            deck.effects.echo
-                ? .45
-                : 0;
-
-        deck.feedback.gain.value =
-            deck.effects.echo
-                ? .32
-                : 0;
-
-    }
-
-
-    if(effect === "reverb"){
-
-        deck.reverbWet.gain.value =
-            deck.effects.reverb
-                ? .35
-                : 0;
-
-    }
-
-
-    if(effect === "flanger"){
-
-        deck.flangerWet.gain.value =
-            deck.effects.flanger
-                ? .30
-                : 0;
-
-    }
-
-}
-
-
-/* =====================================================
-   FX MIX
-===================================================== */
-
-function updateFXMix(
-    deckName
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    const mix =
-        Number(
-            $("fxMix"+deckName).value
-        ) / 100;
-
-
-    if(deck.effects.echo){
-
-        deck.echoWet.gain.value =
-            mix * .7;
-
-    }
-
-
-    if(deck.effects.reverb){
-
-        deck.reverbWet.gain.value =
-            mix * .6;
-
-    }
-
-
-    if(deck.effects.flanger){
-
-        deck.flangerWet.gain.value =
-            mix * .5;
-
-    }
-
-}
-
-
-/* =====================================================
-   SMART DJ
-===================================================== */
-
-function updateSmart(
-    deckName
-){
-
-    const deck =
-        STATE.decks[deckName];
-
-
-    if(!deck){
-
-        return;
-
-    }
-
-
-    $("smartBpm")
-        .textContent =
-        deck.bpm || "--";
-
-
-    $("smartKey")
-        .textContent =
-        deck.key || "--";
-
-
-    $("smartEnergy")
-        .textContent =
-        deck.energy
-            ? deck.energy + "%"
-            : "--";
-
-}
-
-
-/* =====================================================
-   SMART NEXT
-===================================================== */
-
-function smartNext(){
-
-    if(!STATE.library.length){
-
-        $("smartStatus").textContent =
-            "AGREGA MÚSICA";
-
-        return;
-
-    }
-
-
-    const nextDeck =
-        STATE.activeDeck === "A"
-            ? "B"
-            : "A";
-
-
-    const item =
-        STATE.library[
-            random(
-                0,
-                STATE.library.length-1
-            )
-        ];
-
-
-    loadTrack(
-        item.file,
-        nextDeck
-    );
-
-
-    $("nextTrack")
-        .textContent =
-        cleanName(
-            item.file.name
-        );
-
-
-    $("smartStatus")
-        .textContent =
-        `NEXT → DECK ${nextDeck}`;
-
-}
-
-
-/* =====================================================
-   AUTOMIX
-===================================================== */
-
-function toggleAutoMix(){
-
-    STATE.autoMix =
-        !STATE.autoMix;
-
-
-    const button =
-        $("autoMixButton");
-
-
-    button.classList.toggle(
-        "active",
-        STATE.autoMix
-    );
-
-
-    button.textContent =
-        STATE.autoMix
-            ? "🔀 AUTOMIX ON"
-            : "🔀 AUTOMIX OFF";
-
-
-    clearInterval(
-        STATE.mixTimer
-    );
-
-
-    if(STATE.autoMix){
-
-        $("autoMixStatus")
-            .textContent =
-            "Automix funcionando";
-
-        checkAutoMix();
-
-        STATE.mixTimer =
-            setInterval(
-                checkAutoMix,
-                1000
-            );
-
-    }else{
-
-        $("autoMixStatus")
-            .textContent =
-            "Automix detenido";
-
-    }
-
-}
-
-
-/* =====================================================
-   CONTROL AUTOMIX
-===================================================== */
-
-function checkAutoMix(){
-
-    const current =
-        STATE.decks[
-            STATE.activeDeck
-        ];
-
-
-    if(
-        !current ||
-        !current.file ||
-        !current.audio.duration
-    ){
-
-        return;
-
-    }
-
-
-    const transitionSeconds =
-        Number(
-            $("mixDuration").value
-        );
-
-
-    const remaining =
-        current.audio.duration -
-        current.audio.currentTime;
-
-
-    if(
-        remaining <=
-        transitionSeconds
-    ){
-
-        const nextDeck =
-            STATE.activeDeck === "A"
-                ? "B"
-                : "A";
-
-
-        if(
-            !STATE.decks[
-                nextDeck
-            ].file
-        ){
-
-            loadSmartTrack(
-                nextDeck
-            );
-
-        }
-
-
-        if(
-            STATE.decks[
-                nextDeck
-            ].file
-        ){
-
-            startAutomaticMix(
-                nextDeck,
-                transitionSeconds
-            );
-
-        }
-
-    }
-
-}
-
-
-/* =====================================================
-   CARGA INTELIGENTE
-===================================================== */
-
-function loadSmartTrack(
-    deckName
-){
-
-    if(
-        !STATE.library.length
-    ){
-
-        return;
-
-    }
-
-
-    const currentName =
-        STATE.decks[
-            deckName
-        ].file?.name;
-
-
-    let available =
-        STATE.library.filter(
-            item =>
-                item.file.name !==
-                currentName
-        );
-
-
-    if(
-        !available.length
-    ){
-
-        available =
-            STATE.library;
-
-    }
-
-
-    const item =
-        available[
-            random(
-                0,
-                available.length-1
-            )
-        ];
-
-
-    loadTrack(
-        item.file,
-        deckName
-    );
-
-
-    $("nextTrack")
-        .textContent =
-        cleanName(
-            item.file.name
-        );
-
-}
-
-
-/* =====================================================
-   TRANSICIÓN AUTOMÁTICA
-===================================================== */
-
-function startAutomaticMix(
-    nextDeck,
-    seconds
-){
-
-    const currentDeck =
-        STATE.activeDeck === "A"
-            ? "B"
-            : "A";
-
-
-    const next =
-        STATE.decks[
-            nextDeck
-        ];
-
-
-    if(
-        !next ||
-        !next.file
-    ){
-
-        return;
-
-    }
-
-
-    playDeck(
-        nextDeck
-    );
-
-
-    const start =
-        Date.now();
-
-
-    const duration =
-        seconds * 1000;
-
-
-    const timer =
-        setInterval(
-            () => {
-
-                const progress =
-                    Math.min(
-                        1,
-                        (
-                            Date.now() -
-                            start
-                        ) /
-                        duration
-                    );
-
-
-                /*
-                   A → B
-                */
-
-                if(nextDeck === "B"){
-
-                    $("crossfader").value =
-                        progress * 100;
-
-                }else{
-
-                    $("crossfader").value =
-                        100 -
-                        progress * 100;
-
-                }
-
-
-                updateCrossfader();
-
-
-                if(progress >= 1){
-
-                    clearInterval(
-                        timer
-                    );
-
-
-                    stopDeck(
-                        currentDeck
-                    );
-
-
-                    STATE.activeDeck =
-                        nextDeck;
-
-                }
-
-            },
-            100
-        );
-
-}
-
-
-/* =====================================================
-   BIBLIOTECA
-===================================================== */
-
-function addMusicFiles(
-    files
-){
-
-    Array.from(files).forEach(
-        file => {
-
-            STATE.library.push({
-                file
-            });
-
-        }
-    );
-
-
-    renderLibrary();
-
-}
-
-
-function renderLibrary(){
-
-    const library =
-        $("library");
-
-
-    $("trackCount")
-        .textContent =
-        STATE.library.length +
-        " PISTAS";
-
-
-    library.innerHTML =
-        "";
-
-
-    if(
-        !STATE.library.length
-    ){
-
-        library.innerHTML =
-            `
-            <div class="library-empty">
-                No hay pistas cargadas.
-            </div>
-            `;
-
-        return;
-
-    }
-
-
-    STATE.library.forEach(
-        item => {
-
-            const element =
-                document.createElement(
-                    "div"
-                );
-
-
-            element.className =
-                "library-item";
-
-
-            element.innerHTML =
-                `
-                <strong>
-                    ${escapeHTML(
-                        cleanName(
-                            item.file.name
-                        )
-                    )}
-                </strong>
-
-                <small>
-                    ${escapeHTML(
-                        item.file.type ||
-                        "audio"
-                    )}
-                    •
-                    ${
-                        (
-                            item.file.size /
-                            1048576
-                        ).toFixed(1)
-                    }
-                    MB
-                </small>
-                `;
-
-
-            element.addEventListener(
-                "click",
-                () => {
-
-                    loadTrack(
-                        item.file,
-                        STATE.activeDeck
-                    );
-
-                }
-            );
-
-
-            library.appendChild(
-                element
-            );
-
-        }
-    );
-
-}
-
-
-/* =====================================================
-   SHUFFLE
-===================================================== */
-
-function shuffleLibrary(){
-
-    for(
-        let i =
-            STATE.library.length - 1;
-        i > 0;
-        i--
-    ){
-
-        const j =
-            random(
-                0,
-                i
-            );
-
-
-        [
-            STATE.library[i],
-            STATE.library[j]
-        ] =
-        [
-            STATE.library[j],
-            STATE.library[i]
-        ];
-
-    }
-
-
-    renderLibrary();
-
-}
-
-
-/* =====================================================
-   VOICE ID
-===================================================== */
-
-async function loadVoiceID(
-    file
-){
-
-    if(
-        !file ||
-        !STATE.audio
-    ){
-
-        return;
-
-    }
-
-
-    try{
-
-        const buffer =
-            await file.arrayBuffer();
-
-
-        STATE.voiceBuffer =
-            await STATE.audio.decodeAudioData(
-                buffer
-            );
-
-
-        $("voiceReady")
-            .textContent =
-            "ID LISTO";
-
-
-        $("voiceStatus")
-            .textContent =
-            "Voice ID cargado";
-
-    }catch(error){
-
-        console.error(error);
-
-        $("voiceStatus")
-            .textContent =
-            "Error al cargar ID";
-
-    }
-
-}
-
-
-/* =====================================================
-   REPRODUCIR VOICE ID
-===================================================== */
-
-function playVoiceID(){
-
-    if(
-        !STATE.voiceBuffer ||
-        !STATE.audio
-    ){
-
-        $("voiceStatus")
-            .textContent =
-            "Primero carga un Voice ID";
-
-        return;
-
-    }
-
-
-    const source =
-        STATE.audio.createBufferSource();
-
-
-    const gain =
-        STATE.audio.createGain();
-
-
-    source.buffer =
-        STATE.voiceBuffer;
-
-
-    gain.gain.value =
-        .70;
-
-
-    source
-        .connect(gain)
-        .connect(STATE.master);
-
-
-    source.start();
-
-
-    $("voiceReady")
-        .textContent =
-        "PLAYING";
-
-}
-
-
-/* =====================================================
-   VOICE ID AUTOMÁTICO
-===================================================== */
-
-function toggleAutoVoice(){
-
-    STATE.autoVoice =
-        !STATE.autoVoice;
-
-
-    const button =
-        $("autoVoiceButton");
-
-
-    button.classList.toggle(
-        "active",
-        STATE.autoVoice
-    );
-
-
-    button.textContent =
-        STATE.autoVoice
-            ? "🎙 VOICE ID ON"
-            : "🎙 VOICE ID OFF";
-
-
-    clearInterval(
-        STATE.voiceTimer
-    );
-
-
-    STATE.voiceMinutes =
-        0;
-
-
-    if(
-        STATE.autoVoice
-    ){
-
-        $("voiceStatus")
-            .textContent =
-            "Voice ID automático activo";
-
-
-        STATE.voiceTimer =
-            setInterval(
-                voiceMinuteTick,
-                60000
-            );
-
-    }else{
-
-        $("voiceStatus")
-            .textContent =
-            "Voice ID automático detenido";
-
-    }
-
-}
-
-
-function voiceMinuteTick(){
-
-    STATE.voiceMinutes++;
-
-
-    const interval =
-        Number(
-            $("voiceInterval").value
-        );
-
-
-    if(
-        STATE.voiceMinutes >=
-        interval
-    ){
-
-        STATE.voiceMinutes =
-            0;
-
-
-        playVoiceID();
-
-    }
-
-}
-
-
-/* =====================================================
-   GRABACIÓN
-===================================================== */
-
-function toggleRecording(){
-
-    if(
-        !STATE.recordDestination
-    ){
-
-        return;
-
-    }
-
-
-    if(
-        STATE.recorder
-    ){
-
-        STATE.recorder.stop();
-
-        STATE.recorder =
-            null;
-
-
-        $("recordButton")
-            .textContent =
-            "● GRABAR";
-
-        return;
-
-    }
-
-
-    STATE.recordingChunks =
-        [];
-
-
-    let options = {};
-
-
-    if(
-        window.MediaRecorder &&
-        MediaRecorder.isTypeSupported &&
-        MediaRecorder.isTypeSupported(
-            "audio/webm;codecs=opus"
-        )
-    ){
-
-        options.mimeType =
-            "audio/webm;codecs=opus";
-
-    }
-
-
-    try{
-
-        STATE.recorder =
-            new MediaRecorder(
-                STATE.recordDestination.stream,
-                options
-            );
-
-    }catch(error){
-
-        STATE.recorder =
-            new MediaRecorder(
-                STATE.recordDestination.stream
-            );
-
-    }
-
-
-    STATE.recorder.ondataavailable =
-        event => {
-
-            if(
-                event.data.size
-            ){
-
-                STATE.recordingChunks.push(
-                    event.data
-                );
-
-            }
-
-        };
-
-
-    STATE.recorder.onstop =
-        saveRecording;
-
-
-    STATE.recorder.start();
-
-
-    $("recordButton")
-        .textContent =
-        "■ DETENER";
-
-}
-
-
-/* =====================================================
-   GUARDAR GRABACIÓN
-===================================================== */
-
-function saveRecording(){
-
-    const blob =
-        new Blob(
-            STATE.recordingChunks,
-            {
-                type:
-                    "audio/webm"
-            }
-        );
-
-
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-
-    link.href =
-        url;
-
-
-    link.download =
-        "DJ-HUMBERTO-MIX.webm";
-
-
-    document.body.appendChild(
-        link
-    );
-
-
-    link.click();
-
-
-    link.remove();
-
-
-    setTimeout(
-        () => {
-
-            URL.revokeObjectURL(
-                url
-            );
-
-        },
-        1000
-    );
-
-}
-
-
-/* =====================================================
-   MICRÓFONO
-===================================================== */
-
-async function toggleMicrophone(){
-
-    if(
-        STATE.micStream
-    ){
-
-        STATE.micStream
-            .getTracks()
-            .forEach(
-                track =>
-                    track.stop()
-            );
-
-
-        STATE.micStream =
-            null;
-
-
-        $("micButton")
-            .textContent =
-            "🎤 MIC OFF";
-
-        return;
-
-    }
-
-
-    try{
-
-        STATE.micStream =
-            await navigator
-                .mediaDevices
-                .getUserMedia({
-                    audio:true
-                });
-
-
-        const source =
-            STATE.audio
-                .createMediaStreamSource(
-                    STATE.micStream
-                );
-
-
-        const gain =
-            STATE.audio.createGain();
-
-
-        gain.gain.value =
-            .70;
-
-
-        source
-            .connect(gain)
-            .connect(
-                STATE.master
-            );
-
-
-        $("micButton")
-            .textContent =
-            "🎤 MIC ON";
-
-    }catch(error){
-
-        console.error(error);
-
-        $("bootMessage")
-            .textContent =
-            "No se pudo activar el micrófono.";
-
-    }
-
-}
-
-
-/* =====================================================
-   VISUALIZADOR
-===================================================== */
-
-function startVisualizer(){
-
-    const canvas =
-        $("visualizer");
-
-
-    const context =
-        canvas.getContext(
-            "2d"
-        );
-
-
-    const data =
-        new Uint8Array(
-            STATE.analyser
-                .frequencyBinCount
-        );
-
-
-    function resize(){
-
-        const ratio =
-            window.devicePixelRatio ||
-            1;
-
-
-        canvas.width =
-            canvas.clientWidth *
-            ratio;
-
-
-        canvas.height =
-            canvas.clientHeight *
-            ratio;
-
-
-        context.setTransform(
-            ratio,
-            0,
-            0,
-            ratio,
-            0,
-            0
-        );
-
-    }
-
-
-    resize();
-
-
-    window.addEventListener(
-        "resize",
-        resize
-    );
-
-
-    function draw(){
-
-        requestAnimationFrame(
-            draw
-        );
-
-
-        const width =
-            canvas.clientWidth;
-
-
-        const height =
-            canvas.clientHeight;
-
-
-        context.clearRect(
-            0,
-            0,
-            width,
-            height
-        );
-
-
-        STATE.analyser
-            .getByteFrequencyData(
-                data
-            );
-
-
-        const bars =
-            100;
-
-
-        let total = 0;
-
-
-        for(
-            let i=0;
-            i<bars;
-            i++
-        ){
-
-            const index =
-                Math.floor(
-                    i *
-                    data.length /
-                    bars
-                );
-
-
-            const value =
-                data[index] /
-                255;
-
-
-            total +=
-                value;
-
-
-            const barHeight =
-                value *
-                height *
-                .48;
-
-
-            const x =
-                i *
-                width /
-                bars;
-
-
-            const gradient =
-                context.createLinearGradient(
-                    0,
-                    height,
-                    0,
-                    height-barHeight
-                );
-
-
-            gradient.addColorStop(
-                0,
-                "#00eaff"
-            );
-
-
-            gradient.addColorStop(
-                .5,
-                "#704cff"
-            );
-
-
-            gradient.addColorStop(
-                1,
-                "#ff3eb7"
-            );
-
-
-            context.fillStyle =
-                gradient;
-
-
-            context.fillRect(
-                x,
-                height-barHeight,
-                Math.max(
-                    2,
-                    width/bars-2
-                ),
-                barHeight
-            );
-
-        }
-
-
-        const level =
-            Math.min(
-                100,
-                total /
-                bars *
-                180
-            );
-
-
-        $("vuA").style.height =
-            level + "%";
-
-
-        $("vuB").style.height =
-            Math.min(
-                100,
-                level *
-                (
-                    .7 +
-                    Math.random()*.5
-                )
-            ) + "%";
-
-    }
-
-
-    draw();
-
-}
-
-
-/* =====================================================
-   EVENTOS
-===================================================== */
-
-function setupEvents(){
-
-    $("startButton")
-        .addEventListener(
-            "click",
-            startSystem
-        );
-
-
-    $("loadA")
-        .addEventListener(
-            "click",
-            () =>
-                $("fileA").click()
-        );
-
-
-    $("fileA")
-        .addEventListener(
-            "change",
-            event =>
-                loadTrack(
-                    event.target.files[0],
-                    "A"
-                )
-        );
-
-
-    $("loadB")
-        .addEventListener(
-            "click",
-            () =>
-                $("fileB").click()
-        );
-
-
-    $("fileB")
-        .addEventListener(
-            "change",
-            event =>
-                loadTrack(
-                    event.target.files[0],
-                    "B"
-                )
-        );
-
-
-    $("playA")
-        .addEventListener(
-            "click",
-            () =>
-                playDeck("A")
-        );
-
-
-    $("playB")
-        .addEventListener(
-            "click",
-            () =>
-                playDeck("B")
-        );
-
-
-    $("stopA")
-        .addEventListener(
-            "click",
-            () =>
-                stopDeck("A")
-        );
-
-
-    $("stopB")
-        .addEventListener(
-            "click",
-            () =>
-                stopDeck("B")
-        );
-
-
-    $("volumeA")
-        .addEventListener(
-            "input",
-            () =>
-                updateVolume("A")
-        );
-
-
-    $("volumeB")
-        .addEventListener(
-            "input",
-            () =>
-                updateVolume("B")
-        );
-
-
-    $("pitchA")
-        .addEventListener(
-            "input",
-            () =>
-                updatePitch("A")
-        );
-
-
-    $("pitchB")
-        .addEventListener(
-            "input",
-            () =>
-                updatePitch("B")
-        );
-
-
-    $("seekA")
-        .addEventListener(
-            "input",
-            () =>
-                updateSeek("A")
-        );
-
-
-    $("seekB")
-        .addEventListener(
-            "input",
-            () =>
-                updateSeek("B")
-        );
-
-
-    $("master")
-        .addEventListener(
-            "input",
-            updateMaster
-        );
-
-
-    $("crossfader")
-        .addEventListener(
-            "input",
-            updateCrossfader
-        );
-
-
-    [
-        "eqHigh",
-        "eqMid",
-        "eqLow"
-    ].forEach(
-        id =>
-            $(id).addEventListener(
-                "input",
-                updateEQ
-            )
-    );
-
-
-    document
-        .querySelectorAll(
-            "[data-effect]"
-        )
-        .forEach(
-            button => {
-
-                button.addEventListener(
-                    "click",
-                    () =>
-                        toggleEffect(
-                            button.dataset.deck,
-                            button.dataset.effect
-                        )
-                );
-
-            }
-        );
-
-
-    $("fxMixA")
-        .addEventListener(
-            "input",
-            () =>
-                updateFXMix("A")
-        );
-
-
-    $("fxMixB")
-        .addEventListener(
-            "input",
-            () =>
-                updateFXMix("B")
-        );
-
-
-    $("autoMixButton")
-        .addEventListener(
-            "click",
-            toggleAutoMix
-        );
-
-
-    $("autoVoiceButton")
-        .addEventListener(
-            "click",
-            toggleAutoVoice
-        );
-
-
-    $("smartNext")
-        .addEventListener(
-            "click",
-            smartNext
-        );
-
-
-    $("shuffleButton")
-        .addEventListener(
-            "click",
-            shuffleLibrary
-        );
-
-
-    $("addMusic")
-        .addEventListener(
-            "click",
-            () =>
-                $("musicFiles").click()
-        );
-
-
-    $("musicFiles")
-        .addEventListener(
-            "change",
-            event =>
-                addMusicFiles(
-                    event.target.files
-                )
-        );
-
-
-    $("clearLibrary")
-        .addEventListener(
-            "click",
-            () => {
-
-                STATE.library =
-                    [];
-
-                renderLibrary();
-
-            }
-        );
-
-
-    $("recordButton")
-        .addEventListener(
-            "click",
-            toggleRecording
-        );
-
-
-    $("micButton")
-        .addEventListener(
-            "click",
-            toggleMicrophone
-        );
-
-
-    $("loadVoice")
-        .addEventListener(
-            "click",
-            () =>
-                $("voiceFile").click()
-        );
-
-
-    $("voiceFile")
-        .addEventListener(
-            "change",
-            async event => {
-
-                await loadVoiceID(
-                    event.target.files[0]
-                );
-
-            }
-        );
-
-
-    $("playVoice")
-        .addEventListener(
-            "click",
-            playVoiceID
-        );
-
-}
-
-
-/* =====================================================
-   ATAJOS
-===================================================== */
-
-function setupKeyboard(){
-
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if(
-                event.target.matches(
-                    "input,select"
-                )
-            ){
-
-                return;
-
-            }
-
-
-            if(
-                event.code === "Space"
-            ){
-
-                event.preventDefault();
-
-
-                const deck =
-                    STATE.decks[
-                        STATE.activeDeck
-                    ];
-
-
-                if(!deck){
-
-                    return;
-
-                }
-
-
-                if(
-                    deck.audio.paused
-                ){
-
-                    playDeck(
-                        STATE.activeDeck
-                    );
-
-                }else{
-
-                    deck.audio.pause();
-
-                }
-
-            }
-
-
-            if(
-                event.key.toLowerCase()
-                === "a"
-            ){
-
-                playDeck("A");
-
-            }
-
-
-            if(
-                event.key.toLowerCase()
-                === "b"
-            ){
-
-                playDeck("B");
-
-            }
-
-
-            if(
-                event.key.toLowerCase()
-                === "r"
-            ){
-
-                toggleRecording();
-
-            }
-
-        }
-    );
-
-}
-
-
-/* =====================================================
-   ARRANQUE
-===================================================== */
-
-function initialize(){
-
-    updateClock();
-
-
-    setInterval(
-        updateClock,
-        1000
-    );
-
-
-    renderLibrary();
-
-
-    setupEvents();
-
-
-    setupKeyboard();
-
-}
-
-
-if(
-    document.readyState ===
-    "loading"
-){
-
-    document.addEventListener(
-        "DOMContentLoaded",
-        initialize
-    );
-
-}else{
-
-    initialize();
-
-}
+    $("visualStatus").textContent =
+      "VIDEO EN REPRODUCCIÓN";
+
+  }
+);
