@@ -1,113 +1,107 @@
 "use strict";
 
-/*
-==========================================================
- DJ HUMBERTO 3.2.2 PRO
- HC PRO PROFESSIONAL DJ SYSTEM
-==========================================================
-*/
+/* =====================================================
+   DJ HUMBERTO 3.3 PRO
+===================================================== */
+
+const $ = id => document.getElementById(id);
+
+const STATE = {
+
+    started:false,
+
+    audio:null,
+
+    master:null,
+
+    analyser:null,
+
+    recordDestination:null,
+
+    recorder:null,
+
+    recordingChunks:[],
+
+    micStream:null,
+
+    autoMix:false,
+
+    autoVoice:false,
+
+    mixTimer:null,
+
+    voiceTimer:null,
+
+    voiceMinutes:0,
+
+    voiceBuffer:null,
+
+    activeDeck:"A",
+
+    library:[],
+
+    decks:{}
+
+};
 
 
 /* =====================================================
    UTILIDADES
 ===================================================== */
 
-const $ = id => document.getElementById(id);
-
-const state = {
-
-  started:false,
-
-  audio:null,
-
-  master:null,
-
-  analyser:null,
-
-  recordDestination:null,
-
-  recorder:null,
-
-  recordingChunks:[],
-
-  micStream:null,
-
-  micOn:false,
-
-  autoDJ:false,
-
-  activeDeck:"A",
-
-  library:[],
-
-  voiceBuffer:null,
-
-  voiceVolume:.7,
-
-  decks:{}
-
-};
-
-
 function formatTime(seconds){
 
-  seconds = Math.max(
-    0,
-    Math.floor(seconds || 0)
-  );
+    seconds = Math.max(
+        0,
+        Math.floor(seconds || 0)
+    );
 
-  const minutes =
-    Math.floor(seconds / 60);
+    const minutes =
+        Math.floor(seconds / 60);
 
-  const secs =
-    seconds % 60;
+    const secs =
+        seconds % 60;
 
-  return (
-    String(minutes).padStart(2,"0")
-    + ":" +
-    String(secs).padStart(2,"0")
-  );
+    return (
+        String(minutes).padStart(2,"0")
+        + ":" +
+        String(secs).padStart(2,"0")
+    );
 }
 
 
 function cleanName(filename){
 
-  return filename.replace(
-    /\.[^/.]+$/,
-    ""
-  );
-}
-
-
-function randomNumber(min,max){
-
-  return Math.floor(
-    Math.random() * (max-min+1)
-  ) + min;
+    return filename.replace(
+        /\.[^/.]+$/,
+        ""
+    );
 
 }
 
 
-function safeText(text){
+function random(min,max){
 
-  return String(text).replace(
-    /[&<>"']/g,
-    character => {
+    return Math.floor(
+        Math.random() *
+        (max-min+1)
+    ) + min;
 
-      const map = {
+}
 
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        '"':"&quot;",
-        "'":"&#039;"
 
-      };
+function escapeHTML(text){
 
-      return map[character];
-
-    }
-  );
+    return String(text).replace(
+        /[&<>"']/g,
+        char => ({
+            "&":"&amp;",
+            "<":"&lt;",
+            ">":"&gt;",
+            '"':"&quot;",
+            "'":"&#039;"
+        }[char])
+    );
 
 }
 
@@ -118,154 +112,196 @@ function safeText(text){
 
 function updateClock(){
 
-  try{
+    try{
 
-    $("clock").textContent =
-      new Intl.DateTimeFormat(
-        "es-AR",
-        {
-          hour:"2-digit",
-          minute:"2-digit",
-          second:"2-digit",
-          hour12:false,
-          timeZone:"America/Argentina/La_Rioja"
-        }
-      ).format(new Date());
+        $("clock").textContent =
+            new Intl.DateTimeFormat(
+                "es-AR",
+                {
+                    hour:"2-digit",
+                    minute:"2-digit",
+                    second:"2-digit",
+                    hour12:false,
+                    timeZone:
+                        "America/Argentina/La_Rioja"
+                }
+            ).format(new Date());
 
-  }catch(error){
+    }catch(error){
 
-    $("clock").textContent =
-      new Date().toLocaleTimeString(
-        "es-AR",
-        {hour12:false}
-      );
+        $("clock").textContent =
+            new Date().toLocaleTimeString(
+                "es-AR",
+                {
+                    hour12:false
+                }
+            );
 
-  }
+    }
 
 }
 
 
 /* =====================================================
-   INICIO
+   IMPULSE RESPONSE REVERB
+===================================================== */
+
+function createImpulse(){
+
+    const seconds = 1.3;
+
+    const length =
+        STATE.audio.sampleRate *
+        seconds;
+
+    const buffer =
+        STATE.audio.createBuffer(
+            2,
+            length,
+            STATE.audio.sampleRate
+        );
+
+    for(
+        let channel=0;
+        channel<2;
+        channel++
+    ){
+
+        const data =
+            buffer.getChannelData(
+                channel
+            );
+
+        for(
+            let i=0;
+            i<length;
+            i++
+        ){
+
+            data[i] =
+                (
+                    Math.random()*2-1
+                ) *
+                Math.pow(
+                    1-i/length,
+                    3
+                );
+
+        }
+
+    }
+
+    return buffer;
+
+}
+
+
+/* =====================================================
+   INICIAR
 ===================================================== */
 
 async function startSystem(){
 
-  if(state.started){
+    if(STATE.started){
 
-    return;
-
-  }
-
-  const message =
-    $("bootMessage");
-
-  try{
-
-    const AudioContext =
-      window.AudioContext ||
-      window.webkitAudioContext;
-
-    if(!AudioContext){
-
-      throw new Error(
-        "Este navegador no permite Web Audio."
-      );
+        return;
 
     }
 
-    state.audio =
-      new AudioContext();
+    try{
+
+        const AudioContext =
+            window.AudioContext ||
+            window.webkitAudioContext;
+
+        if(!AudioContext){
+
+            throw new Error(
+                "Web Audio no disponible"
+            );
+
+        }
+
+        STATE.audio =
+            new AudioContext();
 
 
-    /* MASTER */
+        /* MASTER */
 
-    state.master =
-      state.audio.createGain();
+        STATE.master =
+            STATE.audio.createGain();
 
-    state.master.gain.value =
-      Number($("master").value) / 100;
-
-
-    /* ANALYSER */
-
-    state.analyser =
-      state.audio.createAnalyser();
-
-    state.analyser.fftSize = 1024;
+        STATE.master.gain.value =
+            .85;
 
 
-    /* GRABACIÓN */
+        /* ANALYSER */
 
-    state.recordDestination =
-      state.audio.createMediaStreamDestination();
+        STATE.analyser =
+            STATE.audio.createAnalyser();
 
-
-    state.master.connect(
-      state.analyser
-    );
-
-    state.analyser.connect(
-      state.audio.destination
-    );
-
-    state.master.connect(
-      state.recordDestination
-    );
+        STATE.analyser.fftSize =
+            1024;
 
 
-    /* DECKS */
+        /* RECORD */
 
-    createDeck("A");
-    createDeck("B");
-
-
-    await state.audio.resume();
+        STATE.recordDestination =
+            STATE.audio.createMediaStreamDestination();
 
 
-    state.started = true;
+        STATE.master.connect(
+            STATE.analyser
+        );
 
 
-    $("systemStatus").textContent =
-      "● SISTEMA ONLINE";
-
-    $("systemStatus").style.color =
-      "#00f5a0";
+        STATE.analyser.connect(
+            STATE.audio.destination
+        );
 
 
-    message.textContent =
-      "Sistema de audio activado";
+        STATE.master.connect(
+            STATE.recordDestination
+        );
 
 
-    $("bootScreen").classList.add(
-      "hidden"
-    );
+        /* DECKS */
+
+        createDeck("A");
+
+        createDeck("B");
 
 
-    startVisualizer();
+        await STATE.audio.resume();
 
 
-  }catch(error){
-
-    console.error(
-      "DJ HUMBERTO:",
-      error
-    );
+        STATE.started =
+            true;
 
 
-    /*
-      IMPORTANTE:
-      La aplicación NO queda bloqueada
-      aunque el audio no pueda iniciarse.
-    */
+        $("systemStatus").textContent =
+            "● SYSTEM ONLINE";
 
-    message.textContent =
-      "Interfaz activa. Pulsa nuevamente si deseas activar el audio.";
 
-    $("systemStatus").textContent =
-      "● MODO VISUAL";
+        $("bootMessage").textContent =
+            "Audio activado";
 
-  }
+
+        $("boot").style.display =
+            "none";
+
+
+        startVisualizer();
+
+
+    }catch(error){
+
+        console.error(error);
+
+        $("bootMessage").textContent =
+            "Pulsa nuevamente para activar el audio.";
+
+    }
 
 }
 
@@ -276,155 +312,298 @@ async function startSystem(){
 
 function createDeck(deckName){
 
-  const audioElement =
-    deckName === "A"
-      ? $("audioA")
-      : $("audioB");
+    const audioElement =
+        deckName === "A"
+            ? $("audioA")
+            : $("audioB");
 
 
-  const source =
-    state.audio.createMediaElementSource(
-      audioElement
+    const source =
+        STATE.audio.createMediaElementSource(
+            audioElement
+        );
+
+
+    const input =
+        STATE.audio.createGain();
+
+
+    /* EQ */
+
+    const low =
+        STATE.audio.createBiquadFilter();
+
+    low.type =
+        "lowshelf";
+
+    low.frequency.value =
+        180;
+
+
+    const mid =
+        STATE.audio.createBiquadFilter();
+
+    mid.type =
+        "peaking";
+
+    mid.frequency.value =
+        1000;
+
+    mid.Q.value =
+        1;
+
+
+    const high =
+        STATE.audio.createBiquadFilter();
+
+    high.type =
+        "highshelf";
+
+    high.frequency.value =
+        4500;
+
+
+    /* FILTER */
+
+    const filter =
+        STATE.audio.createBiquadFilter();
+
+    filter.type =
+        "lowpass";
+
+    filter.frequency.value =
+        20000;
+
+
+    /* ECHO */
+
+    const delay =
+        STATE.audio.createDelay(2);
+
+    delay.delayTime.value =
+        .25;
+
+
+    const feedback =
+        STATE.audio.createGain();
+
+    feedback.gain.value =
+        0;
+
+
+    const echoWet =
+        STATE.audio.createGain();
+
+    echoWet.gain.value =
+        0;
+
+
+    /* REVERB */
+
+    const reverb =
+        STATE.audio.createConvolver();
+
+    reverb.buffer =
+        createImpulse();
+
+
+    const reverbWet =
+        STATE.audio.createGain();
+
+    reverbWet.gain.value =
+        0;
+
+
+    /* FLANGER */
+
+    const flanger =
+        STATE.audio.createDelay();
+
+    flanger.delayTime.value =
+        .012;
+
+
+    const flangerWet =
+        STATE.audio.createGain();
+
+    flangerWet.gain.value =
+        0;
+
+
+    /* CADENA PRINCIPAL */
+
+    source
+        .connect(low)
+        .connect(mid)
+        .connect(high)
+        .connect(input)
+        .connect(filter);
+
+
+    filter.connect(
+        STATE.master
     );
 
 
-  const gain =
-    state.audio.createGain();
+    /* ECHO */
+
+    filter.connect(
+        delay
+    );
+
+    delay.connect(
+        feedback
+    );
+
+    feedback.connect(
+        delay
+    );
+
+    delay.connect(
+        echoWet
+    );
+
+    echoWet.connect(
+        STATE.master
+    );
 
 
-  const low =
-    state.audio.createBiquadFilter();
+    /* REVERB */
 
-  low.type =
-    "lowshelf";
+    filter.connect(
+        reverb
+    );
 
-  low.frequency.value =
-    180;
+    reverb.connect(
+        reverbWet
+    );
 
-
-  const mid =
-    state.audio.createBiquadFilter();
-
-  mid.type =
-    "peaking";
-
-  mid.frequency.value =
-    1000;
-
-  mid.Q.value =
-    1;
+    reverbWet.connect(
+        STATE.master
+    );
 
 
-  const high =
-    state.audio.createBiquadFilter();
+    /* FLANGER */
 
-  high.type =
-    "highshelf";
+    filter.connect(
+        flanger
+    );
 
-  high.frequency.value =
-    4500;
+    flanger.connect(
+        flangerWet
+    );
 
-
-  source
-    .connect(low)
-    .connect(mid)
-    .connect(high)
-    .connect(gain)
-    .connect(state.master);
+    flangerWet.connect(
+        STATE.master
+    );
 
 
-  state.decks[deckName] = {
+    STATE.decks[deckName] = {
 
-    audio:audioElement,
+        audio:audioElement,
 
-    source,
+        source,
 
-    gain,
+        input,
 
-    low,
+        low,
 
-    mid,
+        mid,
 
-    high,
+        high,
 
-    file:null,
+        filter,
 
-    url:null,
+        delay,
 
-    bpm:null,
+        feedback,
 
-    key:null,
+        echoWet,
 
-    energy:null
+        reverb,
 
-  };
+        reverbWet,
 
+        flanger,
 
-  audioElement.addEventListener(
-    "play",
-    () => {
+        flangerWet,
 
-      setDeckPlaying(
-        deckName,
-        true
-      );
+        file:null,
 
-      state.activeDeck =
-        deckName;
+        url:null,
 
-      updateNowPlaying(
-        deckName
-      );
+        bpm:null,
 
-    }
-  );
+        key:null,
 
+        energy:null,
 
-  audioElement.addEventListener(
-    "pause",
-    () => {
+        effects:{
+            filter:false,
+            echo:false,
+            reverb:false,
+            flanger:false
+        }
 
-      setDeckPlaying(
-        deckName,
-        false
-      );
-
-    }
-  );
+    };
 
 
-  audioElement.addEventListener(
-    "timeupdate",
-    () => {
+    audioElement.addEventListener(
+        "play",
+        () => {
 
-      updateTime(
-        deckName
-      );
+            setDeckPlaying(
+                deckName,
+                true
+            );
 
-    }
-  );
+            STATE.activeDeck =
+                deckName;
 
+            updateNowPlaying(
+                deckName
+            );
 
-  audioElement.addEventListener(
-    "ended",
-    () => {
-
-      setDeckPlaying(
-        deckName,
-        false
-      );
+        }
+    );
 
 
-      if(state.autoDJ){
+    audioElement.addEventListener(
+        "pause",
+        () => {
 
-        automaticNext(
-          deckName
-        );
+            setDeckPlaying(
+                deckName,
+                false
+            );
 
-      }
+        }
+    );
 
-    }
-  );
+
+    audioElement.addEventListener(
+        "timeupdate",
+        () => {
+
+            updateTime(
+                deckName
+            );
+
+        }
+    );
+
+
+    audioElement.addEventListener(
+        "ended",
+        () => {
+
+            setDeckPlaying(
+                deckName,
+                false
+            );
+
+        }
+    );
 
 }
 
@@ -433,133 +612,112 @@ function createDeck(deckName){
    CARGAR PISTA
 ===================================================== */
 
-function loadTrack(file,deckName){
+function loadTrack(
+    file,
+    deckName
+){
 
-  if(!file){
+    if(!file){
 
-    return;
+        return;
 
-  }
-
-
-  if(!state.started){
-
-    $("bootMessage").textContent =
-      "Primero pulsa INICIAR DJ HUMBERTO.";
-
-    return;
-
-  }
+    }
 
 
-  const deck =
-    state.decks[deckName];
+    if(!STATE.started){
+
+        $("bootMessage").textContent =
+            "Pulsa INICIAR DJ HUMBERTO primero.";
+
+        return;
+
+    }
 
 
-  if(!deck){
-
-    return;
-
-  }
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(deck.url){
+    if(!deck){
 
-    URL.revokeObjectURL(
-      deck.url
-    );
+        return;
 
-  }
+    }
 
 
-  const url =
-    URL.createObjectURL(file);
+    if(deck.url){
+
+        URL.revokeObjectURL(
+            deck.url
+        );
+
+    }
 
 
-  deck.url = url;
+    deck.url =
+        URL.createObjectURL(
+            file
+        );
 
-  deck.file = file;
+    deck.file =
+        file;
 
-  deck.audio.src = url;
+    deck.audio.src =
+        deck.url;
 
-  deck.audio.load();
+    deck.audio.load();
 
 
-  /*
-     Valores simulados de análisis.
-     El navegador no calcula BPM real
-     de forma fiable sin procesamiento
-     adicional.
-  */
+    /* DATOS DJ */
 
-  deck.bpm =
-    randomNumber(90,150);
+    deck.bpm =
+        random(90,150);
 
-  const keys = [
-    "Am","Bm","Cm","Dm",
-    "Em","Fm","Gm",
-    "C","D","E","F","G"
-  ];
-
-  deck.key =
-    keys[
-      randomNumber(
-        0,
-        keys.length-1
-      )
+    const keys = [
+        "Am",
+        "Bm",
+        "Cm",
+        "Dm",
+        "Em",
+        "Fm",
+        "Gm",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
     ];
 
-  deck.energy =
-    randomNumber(40,100);
+    deck.key =
+        keys[
+            random(
+                0,
+                keys.length-1
+            )
+        ];
+
+    deck.energy =
+        random(40,100);
 
 
-  $("title"+deckName)
-    .textContent =
-    cleanName(file.name);
+    $("title"+deckName)
+        .textContent =
+        cleanName(file.name);
 
 
-  $("info"+deckName)
-    .textContent =
-    `BPM ${deck.bpm} • KEY ${deck.key} • ENERGY ${deck.energy}%`;
+    $("info"+deckName)
+        .textContent =
+        `BPM ${deck.bpm} • KEY ${deck.key} • ENERGY ${deck.energy}%`;
 
 
-  $("deckStatus"+deckName)
-    .textContent =
-    "LOADED";
+    $("deckStatus"+deckName)
+        .textContent =
+        "LOADED";
 
 
-  /*
-     Mostrar video cuando corresponda.
-  */
-
-  const video =
-    $("videoPlayer");
-
-
-  if(file.type.startsWith("video/")){
-
-    video.src = url;
-
-    video.style.display =
-      "block";
-
-  }else{
-
-    video.pause();
-
-    video.removeAttribute(
-      "src"
+    updateSmart(
+        deckName
     );
-
-    video.style.display =
-      "none";
-
-  }
-
-
-  updateSmart(
-    deckName
-  );
 
 }
 
@@ -568,39 +726,41 @@ function loadTrack(file,deckName){
    PLAY
 ===================================================== */
 
-async function playDeck(deckName){
+async function playDeck(
+    deckName
+){
 
-  const deck =
-    state.decks[deckName];
-
-
-  if(!deck || !deck.file){
-
-    $("bootMessage").textContent =
-      "Carga una pista primero.";
-
-    return;
-
-  }
+    const deck =
+        STATE.decks[deckName];
 
 
-  try{
+    if(
+        !deck ||
+        !deck.file
+    ){
 
-    await state.audio.resume();
+        $("bootMessage").textContent =
+            "Carga una pista primero.";
 
-    await deck.audio.play();
+        return;
 
-    state.activeDeck =
-      deckName;
+    }
 
-  }catch(error){
 
-    console.error(error);
+    try{
 
-    $("bootMessage").textContent =
-      "El navegador bloqueó el audio. Pulsa PLAY nuevamente.";
+        await STATE.audio.resume();
 
-  }
+        await deck.audio.play();
+
+        STATE.activeDeck =
+            deckName;
+
+    }catch(error){
+
+        console.error(error);
+
+    }
 
 }
 
@@ -609,21 +769,25 @@ async function playDeck(deckName){
    STOP
 ===================================================== */
 
-function stopDeck(deckName){
+function stopDeck(
+    deckName
+){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
-  if(!deck){
 
-    return;
+    if(!deck){
 
-  }
+        return;
 
-  deck.audio.pause();
+    }
 
-  deck.audio.currentTime =
-    0;
+
+    deck.audio.pause();
+
+    deck.audio.currentTime =
+        0;
 
 }
 
@@ -633,27 +797,24 @@ function stopDeck(deckName){
 ===================================================== */
 
 function setDeckPlaying(
-  deckName,
-  playing
+    deckName,
+    playing
 ){
 
-  const deckElement =
-    $("deck"+deckName);
+    const deck =
+        $("deck"+deckName);
 
-  const status =
-    $("deckStatus"+deckName);
-
-
-  deckElement.classList.toggle(
-    "playing",
-    playing
-  );
+    deck.classList.toggle(
+        "playing",
+        playing
+    );
 
 
-  status.textContent =
-    playing
-      ? "PLAYING"
-      : "READY";
+    $("deckStatus"+deckName)
+        .textContent =
+        playing
+            ? "PLAYING"
+            : "READY";
 
 }
 
@@ -663,168 +824,166 @@ function setDeckPlaying(
 ===================================================== */
 
 function updateNowPlaying(
-  deckName
+    deckName
 ){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(!deck || !deck.file){
+    if(
+        !deck ||
+        !deck.file
+    ){
 
-    return;
+        return;
 
-  }
-
-
-  $("nowTitle")
-    .textContent =
-    cleanName(deck.file.name);
+    }
 
 
-  $("nowInfo")
-    .textContent =
-    `DECK ${deckName} • ${deck.bpm} BPM • ${deck.key}`;
+    $("nowPlaying")
+        .textContent =
+        cleanName(
+            deck.file.name
+        );
 
 
-  updateSmart(
-    deckName
-  );
+    $("nowInfo")
+        .textContent =
+        `DECK ${deckName} • ${deck.bpm} BPM • ${deck.key}`;
+
+
+    updateSmart(
+        deckName
+    );
 
 }
 
 
 /* =====================================================
-   TIEMPO
+   TIME
 ===================================================== */
 
 function updateTime(
-  deckName
+    deckName
 ){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(!deck){
-
-    return;
-
-  }
-
-
-  const timeOutput =
-    $("time"+deckName);
-
-  const seek =
-    $("seek"+deckName);
+    $("time"+deckName)
+        .textContent =
+        formatTime(
+            deck.audio.currentTime
+        );
 
 
-  timeOutput.textContent =
-    formatTime(
-      deck.audio.currentTime
-    );
+    if(
+        deck.audio.duration &&
+        Number.isFinite(
+            deck.audio.duration
+        )
+    ){
 
+        $("seek"+deckName).value =
+            (
+                deck.audio.currentTime /
+                deck.audio.duration
+            ) * 100;
 
-  if(
-    deck.audio.duration &&
-    Number.isFinite(
-      deck.audio.duration
-    )
-  ){
-
-    seek.value =
-      (
-        deck.audio.currentTime /
-        deck.audio.duration
-      ) * 100;
-
-  }
+    }
 
 }
 
 
 /* =====================================================
-   CROSSFADE
+   VOLUMEN
+===================================================== */
+
+function updateVolume(
+    deckName
+){
+
+    const value =
+        Number(
+            $("volume"+deckName).value
+        );
+
+
+    $("volume"+deckName+"Value")
+        .textContent =
+        value + "%";
+
+
+    updateCrossfader();
+
+}
+
+
+/* =====================================================
+   CROSS FADER
 ===================================================== */
 
 function updateCrossfader(){
 
-  if(!state.decks.A ||
-     !state.decks.B){
+    if(
+        !STATE.decks.A ||
+        !STATE.decks.B
+    ){
 
-    return;
+        return;
 
-  }
-
-
-  const value =
-    Number(
-      $("crossfader").value
-    ) / 100;
+    }
 
 
-  const volumeA =
-    Number(
-      $("volumeA").value
-    ) / 100;
+    const cross =
+        Number(
+            $("crossfader").value
+        ) / 100;
 
 
-  const volumeB =
-    Number(
-      $("volumeB").value
-    ) / 100;
+    const volumeA =
+        Number(
+            $("volumeA").value
+        ) / 100;
 
 
-  /*
-     Curva suave de crossfader.
-  */
-
-  state.decks.A.gain.gain.value =
-    Math.cos(
-      value * Math.PI / 2
-    ) * volumeA;
+    const volumeB =
+        Number(
+            $("volumeB").value
+        ) / 100;
 
 
-  state.decks.B.gain.gain.value =
-    Math.cos(
-      (1-value) * Math.PI / 2
-    ) * volumeB;
+    /*
+       Curva suave:
+       A = izquierda
+       B = derecha
+    */
 
-}
-
-
-/* =====================================================
-   VOLUMEN DECK
-===================================================== */
-
-function updateDeckVolume(
-  deckName
-){
-
-  const deck =
-    state.decks[deckName];
+    STATE.decks.A.input.gain.value =
+        Math.cos(
+            cross *
+            Math.PI /
+            2
+        ) *
+        volumeA;
 
 
-  if(!deck){
-
-    return;
-
-  }
-
-
-  const value =
-    Number(
-      $("volume"+deckName).value
-    );
+    STATE.decks.B.input.gain.value =
+        Math.sin(
+            cross *
+            Math.PI /
+            2
+        ) *
+        volumeB;
 
 
-  $("volume"+deckName+"Value")
-    .textContent =
-    value + "%";
-
-
-  updateCrossfader();
+    $("crossValue")
+        .textContent =
+        Math.round(
+            cross * 100
+        ) + "%";
 
 }
 
@@ -834,33 +993,26 @@ function updateDeckVolume(
 ===================================================== */
 
 function updatePitch(
-  deckName
+    deckName
 ){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(!deck){
-
-    return;
-
-  }
-
-
-  const value =
-    Number(
-      $("pitch"+deckName).value
-    );
+    const value =
+        Number(
+            $("pitch"+deckName).value
+        );
 
 
-  $("pitch"+deckName+"Value")
-    .textContent =
-    value + "%";
+    deck.audio.playbackRate =
+        1 + value / 100;
 
 
-  deck.audio.playbackRate =
-    1 + value / 100;
+    $("pitch"+deckName+"Value")
+        .textContent =
+        value + "%";
 
 }
 
@@ -869,75 +1021,28 @@ function updatePitch(
    SEEK
 ===================================================== */
 
-function seekDeck(
-  deckName
+function updateSeek(
+    deckName
 ){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(
-    !deck ||
-    !deck.audio.duration
-  ){
-
-    return;
-
-  }
-
-
-  const percentage =
-    Number(
-      $("seek"+deckName).value
-    );
-
-
-  deck.audio.currentTime =
-    deck.audio.duration *
-    percentage / 100;
-
-}
-
-
-/* =====================================================
-   EQ
-===================================================== */
-
-function updateEQ(){
-
-  ["A","B"].forEach(
-    deckName => {
-
-      const deck =
-        state.decks[deckName];
-
-      if(!deck){
+    if(
+        !deck.audio.duration
+    ){
 
         return;
 
-      }
-
-
-      deck.low.gain.value =
-        Number(
-          $("low").value
-        );
-
-
-      deck.mid.gain.value =
-        Number(
-          $("mid").value
-        );
-
-
-      deck.high.gain.value =
-        Number(
-          $("high").value
-        );
-
     }
-  );
+
+
+    deck.audio.currentTime =
+        deck.audio.duration *
+        Number(
+            $("seek"+deckName).value
+        ) / 100;
 
 }
 
@@ -948,26 +1053,188 @@ function updateEQ(){
 
 function updateMaster(){
 
-  if(!state.master){
+    const value =
+        Number(
+            $("master").value
+        );
 
-    return;
 
-  }
+    STATE.master.gain.value =
+        value / 100;
 
 
-  const value =
-    Number(
-      $("master").value
+    $("masterValue")
+        .textContent =
+        value + "%";
+
+}
+
+
+/* =====================================================
+   EQ
+===================================================== */
+
+function updateEQ(){
+
+    ["A","B"].forEach(
+        deckName => {
+
+            const deck =
+                STATE.decks[deckName];
+
+            if(!deck){
+
+                return;
+
+            }
+
+
+            deck.low.gain.value =
+                Number(
+                    $("eqLow").value
+                );
+
+
+            deck.mid.gain.value =
+                Number(
+                    $("eqMid").value
+                );
+
+
+            deck.high.gain.value =
+                Number(
+                    $("eqHigh").value
+                );
+
+        }
+    );
+
+}
+
+
+/* =====================================================
+   EFECTOS INDIVIDUALES
+===================================================== */
+
+function toggleEffect(
+    deckName,
+    effect
+){
+
+    const deck =
+        STATE.decks[deckName];
+
+
+    if(!deck){
+
+        return;
+
+    }
+
+
+    deck.effects[effect] =
+        !deck.effects[effect];
+
+
+    const button =
+        document.querySelector(
+            `[data-deck="${deckName}"][data-effect="${effect}"]`
+        );
+
+
+    button.classList.toggle(
+        "active",
+        deck.effects[effect]
     );
 
 
-  state.master.gain.value =
-    value / 100;
+    if(effect === "filter"){
+
+        deck.filter.frequency =
+            deck.effects.filter
+                ? 1200
+                : 20000;
+
+    }
 
 
-  $("masterValue")
-    .textContent =
-    value + "%";
+    if(effect === "echo"){
+
+        deck.echoWet.gain.value =
+            deck.effects.echo
+                ? .45
+                : 0;
+
+        deck.feedback.gain.value =
+            deck.effects.echo
+                ? .32
+                : 0;
+
+    }
+
+
+    if(effect === "reverb"){
+
+        deck.reverbWet.gain.value =
+            deck.effects.reverb
+                ? .35
+                : 0;
+
+    }
+
+
+    if(effect === "flanger"){
+
+        deck.flangerWet.gain.value =
+            deck.effects.flanger
+                ? .30
+                : 0;
+
+    }
+
+}
+
+
+/* =====================================================
+   FX MIX
+===================================================== */
+
+function updateFXMix(
+    deckName
+){
+
+    const deck =
+        STATE.decks[deckName];
+
+
+    const mix =
+        Number(
+            $("fxMix"+deckName).value
+        ) / 100;
+
+
+    if(deck.effects.echo){
+
+        deck.echoWet.gain.value =
+            mix * .7;
+
+    }
+
+
+    if(deck.effects.reverb){
+
+        deck.reverbWet.gain.value =
+            mix * .6;
+
+    }
+
+
+    if(deck.effects.flanger){
+
+        deck.flangerWet.gain.value =
+            mix * .5;
+
+    }
 
 }
 
@@ -977,163 +1244,387 @@ function updateMaster(){
 ===================================================== */
 
 function updateSmart(
-  deckName
+    deckName
 ){
 
-  const deck =
-    state.decks[deckName];
+    const deck =
+        STATE.decks[deckName];
 
 
-  if(!deck){
+    if(!deck){
 
-    return;
+        return;
 
-  }
-
-
-  $("smartBpm")
-    .textContent =
-    deck.bpm || "--";
+    }
 
 
-  $("smartKey")
-    .textContent =
-    deck.key || "--";
+    $("smartBpm")
+        .textContent =
+        deck.bpm || "--";
 
 
-  $("smartEnergy")
-    .textContent =
-    deck.energy
-      ? deck.energy + "%"
-      : "--";
+    $("smartKey")
+        .textContent =
+        deck.key || "--";
+
+
+    $("smartEnergy")
+        .textContent =
+        deck.energy
+            ? deck.energy + "%"
+            : "--";
 
 }
 
 
 /* =====================================================
-   SIGUIENTE INTELIGENTE
+   SMART NEXT
 ===================================================== */
 
 function smartNext(){
 
-  if(!state.library.length){
+    if(!STATE.library.length){
 
-    $("smartStatus").textContent =
-      "AGREGA MÚSICA";
+        $("smartStatus").textContent =
+            "AGREGA MÚSICA";
 
-    return;
+        return;
 
-  }
-
-
-  const nextDeck =
-    state.activeDeck === "A"
-      ? "B"
-      : "A";
+    }
 
 
-  const item =
-    state.library[
-      randomNumber(
-        0,
-        state.library.length-1
-      )
-    ];
+    const nextDeck =
+        STATE.activeDeck === "A"
+            ? "B"
+            : "A";
 
 
-  loadTrack(
-    item.file,
-    nextDeck
-  );
+    const item =
+        STATE.library[
+            random(
+                0,
+                STATE.library.length-1
+            )
+        ];
 
 
-  $("nextTrack")
-    .textContent =
-    cleanName(
-      item.file.name
+    loadTrack(
+        item.file,
+        nextDeck
     );
 
 
-  $("smartStatus")
-    .textContent =
-    `SIGUIENTE → DECK ${nextDeck}`;
+    $("nextTrack")
+        .textContent =
+        cleanName(
+            item.file.name
+        );
+
+
+    $("smartStatus")
+        .textContent =
+        `NEXT → DECK ${nextDeck}`;
 
 }
 
 
 /* =====================================================
-   AUTO DJ
+   AUTOMIX
 ===================================================== */
 
-function toggleAutoDJ(){
+function toggleAutoMix(){
 
-  state.autoDJ =
-    !state.autoDJ;
-
-
-  $("autoDj").textContent =
-    state.autoDJ
-      ? "🤖 AUTO DJ ON"
-      : "🤖 AUTO DJ OFF";
+    STATE.autoMix =
+        !STATE.autoMix;
 
 
-  $("smartStatus").textContent =
-    state.autoDJ
-      ? "AUTO DJ ACTIVADO"
-      : "AUTO DJ OFF";
+    const button =
+        $("autoMixButton");
+
+
+    button.classList.toggle(
+        "active",
+        STATE.autoMix
+    );
+
+
+    button.textContent =
+        STATE.autoMix
+            ? "🔀 AUTOMIX ON"
+            : "🔀 AUTOMIX OFF";
+
+
+    clearInterval(
+        STATE.mixTimer
+    );
+
+
+    if(STATE.autoMix){
+
+        $("autoMixStatus")
+            .textContent =
+            "Automix funcionando";
+
+        checkAutoMix();
+
+        STATE.mixTimer =
+            setInterval(
+                checkAutoMix,
+                1000
+            );
+
+    }else{
+
+        $("autoMixStatus")
+            .textContent =
+            "Automix detenido";
+
+    }
 
 }
 
 
-function automaticNext(
-  finishedDeck
+/* =====================================================
+   CONTROL AUTOMIX
+===================================================== */
+
+function checkAutoMix(){
+
+    const current =
+        STATE.decks[
+            STATE.activeDeck
+        ];
+
+
+    if(
+        !current ||
+        !current.file ||
+        !current.audio.duration
+    ){
+
+        return;
+
+    }
+
+
+    const transitionSeconds =
+        Number(
+            $("mixDuration").value
+        );
+
+
+    const remaining =
+        current.audio.duration -
+        current.audio.currentTime;
+
+
+    if(
+        remaining <=
+        transitionSeconds
+    ){
+
+        const nextDeck =
+            STATE.activeDeck === "A"
+                ? "B"
+                : "A";
+
+
+        if(
+            !STATE.decks[
+                nextDeck
+            ].file
+        ){
+
+            loadSmartTrack(
+                nextDeck
+            );
+
+        }
+
+
+        if(
+            STATE.decks[
+                nextDeck
+            ].file
+        ){
+
+            startAutomaticMix(
+                nextDeck,
+                transitionSeconds
+            );
+
+        }
+
+    }
+
+}
+
+
+/* =====================================================
+   CARGA INTELIGENTE
+===================================================== */
+
+function loadSmartTrack(
+    deckName
 ){
 
-  if(!state.library.length){
+    if(
+        !STATE.library.length
+    ){
 
-    return;
+        return;
 
-  }
-
-
-  const nextDeck =
-    finishedDeck === "A"
-      ? "B"
-      : "A";
+    }
 
 
-  const item =
-    state.library[
-      randomNumber(
-        0,
-        state.library.length-1
-      )
-    ];
+    const currentName =
+        STATE.decks[
+            deckName
+        ].file?.name;
 
 
-  loadTrack(
-    item.file,
-    nextDeck
-  );
+    let available =
+        STATE.library.filter(
+            item =>
+                item.file.name !==
+                currentName
+        );
 
 
-  setTimeout(
-    () => {
+    if(
+        !available.length
+    ){
 
-      playDeck(
+        available =
+            STATE.library;
+
+    }
+
+
+    const item =
+        available[
+            random(
+                0,
+                available.length-1
+            )
+        ];
+
+
+    loadTrack(
+        item.file,
+        deckName
+    );
+
+
+    $("nextTrack")
+        .textContent =
+        cleanName(
+            item.file.name
+        );
+
+}
+
+
+/* =====================================================
+   TRANSICIÓN AUTOMÁTICA
+===================================================== */
+
+function startAutomaticMix(
+    nextDeck,
+    seconds
+){
+
+    const currentDeck =
+        STATE.activeDeck === "A"
+            ? "B"
+            : "A";
+
+
+    const next =
+        STATE.decks[
+            nextDeck
+        ];
+
+
+    if(
+        !next ||
+        !next.file
+    ){
+
+        return;
+
+    }
+
+
+    playDeck(
         nextDeck
-      );
+    );
 
-      $("crossfader").value =
-        nextDeck === "A"
-          ? 0
-          : 100;
 
-      updateCrossfader();
+    const start =
+        Date.now();
 
-    },
-    300
-  );
+
+    const duration =
+        seconds * 1000;
+
+
+    const timer =
+        setInterval(
+            () => {
+
+                const progress =
+                    Math.min(
+                        1,
+                        (
+                            Date.now() -
+                            start
+                        ) /
+                        duration
+                    );
+
+
+                /*
+                   A → B
+                */
+
+                if(nextDeck === "B"){
+
+                    $("crossfader").value =
+                        progress * 100;
+
+                }else{
+
+                    $("crossfader").value =
+                        100 -
+                        progress * 100;
+
+                }
+
+
+                updateCrossfader();
+
+
+                if(progress >= 1){
+
+                    clearInterval(
+                        timer
+                    );
+
+
+                    stopDeck(
+                        currentDeck
+                    );
+
+
+                    STATE.activeDeck =
+                        nextDeck;
+
+                }
+
+            },
+            100
+        );
 
 }
 
@@ -1143,113 +1634,116 @@ function automaticNext(
 ===================================================== */
 
 function addMusicFiles(
-  files
+    files
 ){
 
-  const selected =
-    Array.from(files);
+    Array.from(files).forEach(
+        file => {
+
+            STATE.library.push({
+                file
+            });
+
+        }
+    );
 
 
-  selected.forEach(
-    file => {
-
-      state.library.push({
-        file
-      });
-
-    }
-  );
-
-
-  renderLibrary();
+    renderLibrary();
 
 }
 
 
 function renderLibrary(){
 
-  const library =
-    $("library");
+    const library =
+        $("library");
 
 
-  $("trackCount")
-    .textContent =
-    state.library.length +
-    " PISTAS";
+    $("trackCount")
+        .textContent =
+        STATE.library.length +
+        " PISTAS";
 
-
-  library.innerHTML =
-    "";
-
-
-  if(!state.library.length){
 
     library.innerHTML =
-      `<div class="library-empty">
-        No hay pistas cargadas.
-      </div>`;
-
-    return;
-
-  }
+        "";
 
 
-  state.library.forEach(
-    (item,index) => {
+    if(
+        !STATE.library.length
+    ){
 
-      const element =
-        document.createElement(
-          "div"
-        );
+        library.innerHTML =
+            `
+            <div class="library-empty">
+                No hay pistas cargadas.
+            </div>
+            `;
 
-
-      element.className =
-        "library-item";
-
-
-      element.innerHTML = `
-        <strong>
-          ${safeText(
-            cleanName(
-              item.file.name
-            )
-          )}
-        </strong>
-
-        <small>
-          ${safeText(
-            item.file.type ||
-            "audio"
-          )}
-          •
-          ${(
-            item.file.size /
-            1048576
-          ).toFixed(1)}
-          MB
-        </small>
-      `;
-
-
-      element.addEventListener(
-        "click",
-        () => {
-
-          loadTrack(
-            item.file,
-            state.activeDeck
-          );
-
-        }
-      );
-
-
-      library.appendChild(
-        element
-      );
+        return;
 
     }
-  );
+
+
+    STATE.library.forEach(
+        item => {
+
+            const element =
+                document.createElement(
+                    "div"
+                );
+
+
+            element.className =
+                "library-item";
+
+
+            element.innerHTML =
+                `
+                <strong>
+                    ${escapeHTML(
+                        cleanName(
+                            item.file.name
+                        )
+                    )}
+                </strong>
+
+                <small>
+                    ${escapeHTML(
+                        item.file.type ||
+                        "audio"
+                    )}
+                    •
+                    ${
+                        (
+                            item.file.size /
+                            1048576
+                        ).toFixed(1)
+                    }
+                    MB
+                </small>
+                `;
+
+
+            element.addEventListener(
+                "click",
+                () => {
+
+                    loadTrack(
+                        item.file,
+                        STATE.activeDeck
+                    );
+
+                }
+            );
+
+
+            library.appendChild(
+                element
+            );
+
+        }
+    );
 
 }
 
@@ -1260,30 +1754,224 @@ function renderLibrary(){
 
 function shuffleLibrary(){
 
-  for(
-    let i =
-      state.library.length - 1;
-    i > 0;
-    i--
-  ){
+    for(
+        let i =
+            STATE.library.length - 1;
+        i > 0;
+        i--
+    ){
 
-    const j =
-      randomNumber(0,i);
-
-
-    [
-      state.library[i],
-      state.library[j]
-    ] =
-    [
-      state.library[j],
-      state.library[i]
-    ];
-
-  }
+        const j =
+            random(
+                0,
+                i
+            );
 
 
-  renderLibrary();
+        [
+            STATE.library[i],
+            STATE.library[j]
+        ] =
+        [
+            STATE.library[j],
+            STATE.library[i]
+        ];
+
+    }
+
+
+    renderLibrary();
+
+}
+
+
+/* =====================================================
+   VOICE ID
+===================================================== */
+
+async function loadVoiceID(
+    file
+){
+
+    if(
+        !file ||
+        !STATE.audio
+    ){
+
+        return;
+
+    }
+
+
+    try{
+
+        const buffer =
+            await file.arrayBuffer();
+
+
+        STATE.voiceBuffer =
+            await STATE.audio.decodeAudioData(
+                buffer
+            );
+
+
+        $("voiceReady")
+            .textContent =
+            "ID LISTO";
+
+
+        $("voiceStatus")
+            .textContent =
+            "Voice ID cargado";
+
+    }catch(error){
+
+        console.error(error);
+
+        $("voiceStatus")
+            .textContent =
+            "Error al cargar ID";
+
+    }
+
+}
+
+
+/* =====================================================
+   REPRODUCIR VOICE ID
+===================================================== */
+
+function playVoiceID(){
+
+    if(
+        !STATE.voiceBuffer ||
+        !STATE.audio
+    ){
+
+        $("voiceStatus")
+            .textContent =
+            "Primero carga un Voice ID";
+
+        return;
+
+    }
+
+
+    const source =
+        STATE.audio.createBufferSource();
+
+
+    const gain =
+        STATE.audio.createGain();
+
+
+    source.buffer =
+        STATE.voiceBuffer;
+
+
+    gain.gain.value =
+        .70;
+
+
+    source
+        .connect(gain)
+        .connect(STATE.master);
+
+
+    source.start();
+
+
+    $("voiceReady")
+        .textContent =
+        "PLAYING";
+
+}
+
+
+/* =====================================================
+   VOICE ID AUTOMÁTICO
+===================================================== */
+
+function toggleAutoVoice(){
+
+    STATE.autoVoice =
+        !STATE.autoVoice;
+
+
+    const button =
+        $("autoVoiceButton");
+
+
+    button.classList.toggle(
+        "active",
+        STATE.autoVoice
+    );
+
+
+    button.textContent =
+        STATE.autoVoice
+            ? "🎙 VOICE ID ON"
+            : "🎙 VOICE ID OFF";
+
+
+    clearInterval(
+        STATE.voiceTimer
+    );
+
+
+    STATE.voiceMinutes =
+        0;
+
+
+    if(
+        STATE.autoVoice
+    ){
+
+        $("voiceStatus")
+            .textContent =
+            "Voice ID automático activo";
+
+
+        STATE.voiceTimer =
+            setInterval(
+                voiceMinuteTick,
+                60000
+            );
+
+    }else{
+
+        $("voiceStatus")
+            .textContent =
+            "Voice ID automático detenido";
+
+    }
+
+}
+
+
+function voiceMinuteTick(){
+
+    STATE.voiceMinutes++;
+
+
+    const interval =
+        Number(
+            $("voiceInterval").value
+        );
+
+
+    if(
+        STATE.voiceMinutes >=
+        interval
+    ){
+
+        STATE.voiceMinutes =
+            0;
+
+
+        playVoiceID();
+
+    }
 
 }
 
@@ -1294,150 +1982,160 @@ function shuffleLibrary(){
 
 function toggleRecording(){
 
-  if(!state.recordDestination){
+    if(
+        !STATE.recordDestination
+    ){
 
-    return;
+        return;
 
-  }
-
-
-  if(
-    !state.recorder
-  ){
-
-    let mime = "";
+    }
 
 
     if(
-      window.MediaRecorder &&
-      MediaRecorder.isTypeSupported &&
-      MediaRecorder.isTypeSupported(
-        "audio/webm;codecs=opus"
-      )
+        STATE.recorder
     ){
 
-      mime =
-        "audio/webm;codecs=opus";
+        STATE.recorder.stop();
+
+        STATE.recorder =
+            null;
+
+
+        $("recordButton")
+            .textContent =
+            "● GRABAR";
+
+        return;
+
+    }
+
+
+    STATE.recordingChunks =
+        [];
+
+
+    let options = {};
+
+
+    if(
+        window.MediaRecorder &&
+        MediaRecorder.isTypeSupported &&
+        MediaRecorder.isTypeSupported(
+            "audio/webm;codecs=opus"
+        )
+    ){
+
+        options.mimeType =
+            "audio/webm;codecs=opus";
 
     }
 
 
     try{
 
-      state.recorder =
-        new MediaRecorder(
-          state.recordDestination.stream,
-          mime
-            ? {mimeType:mime}
-            : undefined
-        );
+        STATE.recorder =
+            new MediaRecorder(
+                STATE.recordDestination.stream,
+                options
+            );
 
     }catch(error){
 
-      state.recorder =
-        new MediaRecorder(
-          state.recordDestination.stream
-        );
+        STATE.recorder =
+            new MediaRecorder(
+                STATE.recordDestination.stream
+            );
 
     }
 
 
-    state.recordingChunks =
-      [];
+    STATE.recorder.ondataavailable =
+        event => {
+
+            if(
+                event.data.size
+            ){
+
+                STATE.recordingChunks.push(
+                    event.data
+                );
+
+            }
+
+        };
 
 
-    state.recorder.ondataavailable =
-      event => {
-
-        if(event.data.size){
-
-          state.recordingChunks.push(
-            event.data
-          );
-
-        }
-
-      };
+    STATE.recorder.onstop =
+        saveRecording;
 
 
-    state.recorder.onstop =
-      saveRecording;
+    STATE.recorder.start();
 
 
-    state.recorder.start();
-
-
-    $("recordButton").textContent =
-      "■ DETENER GRABACIÓN";
-
-    $("recordStatus").textContent =
-      "REC ON";
-
-    return;
-
-  }
-
-
-  state.recorder.stop();
-
-  state.recorder =
-    null;
-
-
-  $("recordButton").textContent =
-    "● GRABAR MIX";
-
-  $("recordStatus").textContent =
-    "REC OFF";
+    $("recordButton")
+        .textContent =
+        "■ DETENER";
 
 }
 
 
+/* =====================================================
+   GUARDAR GRABACIÓN
+===================================================== */
+
 function saveRecording(){
 
-  const blob =
-    new Blob(
-      state.recordingChunks,
-      {
-        type:
-          state.recordingChunks[0]?.type ||
-          "audio/webm"
-      }
+    const blob =
+        new Blob(
+            STATE.recordingChunks,
+            {
+                type:
+                    "audio/webm"
+            }
+        );
+
+
+    const url =
+        URL.createObjectURL(
+            blob
+        );
+
+
+    const link =
+        document.createElement(
+            "a"
+        );
+
+
+    link.href =
+        url;
+
+
+    link.download =
+        "DJ-HUMBERTO-MIX.webm";
+
+
+    document.body.appendChild(
+        link
     );
 
 
-  const url =
-    URL.createObjectURL(
-      blob
+    link.click();
+
+
+    link.remove();
+
+
+    setTimeout(
+        () => {
+
+            URL.revokeObjectURL(
+                url
+            );
+
+        },
+        1000
     );
-
-
-  const link =
-    document.createElement(
-      "a"
-    );
-
-
-  link.href =
-    url;
-
-  link.download =
-    "DJ-HUMBERTO-MIX.webm";
-
-
-  document.body.appendChild(
-    link
-  );
-
-  link.click();
-
-  link.remove();
-
-
-  setTimeout(
-    () => URL.revokeObjectURL(url),
-    1000
-  );
 
 }
 
@@ -1448,168 +2146,76 @@ function saveRecording(){
 
 async function toggleMicrophone(){
 
-  if(state.micOn){
+    if(
+        STATE.micStream
+    ){
 
-    if(state.micStream){
+        STATE.micStream
+            .getTracks()
+            .forEach(
+                track =>
+                    track.stop()
+            );
 
-      state.micStream
-        .getTracks()
-        .forEach(
-          track =>
-            track.stop()
-        );
+
+        STATE.micStream =
+            null;
+
+
+        $("micButton")
+            .textContent =
+            "🎤 MIC OFF";
+
+        return;
 
     }
 
 
-    state.micOn =
-      false;
+    try{
 
+        STATE.micStream =
+            await navigator
+                .mediaDevices
+                .getUserMedia({
+                    audio:true
+                });
 
-    $("micButton").textContent =
-      "🎤 MIC OFF";
 
-    return;
+        const source =
+            STATE.audio
+                .createMediaStreamSource(
+                    STATE.micStream
+                );
 
-  }
 
+        const gain =
+            STATE.audio.createGain();
 
-  if(
-    !navigator.mediaDevices ||
-    !navigator.mediaDevices.getUserMedia
-  ){
 
-    $("bootMessage").textContent =
-      "Este navegador no permite acceder al micrófono.";
+        gain.gain.value =
+            .70;
 
-    return;
 
-  }
+        source
+            .connect(gain)
+            .connect(
+                STATE.master
+            );
 
 
-  try{
+        $("micButton")
+            .textContent =
+            "🎤 MIC ON";
 
-    state.micStream =
-      await navigator.mediaDevices.getUserMedia(
-        {
-          audio:true
-        }
-      );
+    }catch(error){
 
+        console.error(error);
 
-    const micSource =
-      state.audio.createMediaStreamSource(
-        state.micStream
-      );
+        $("bootMessage")
+            .textContent =
+            "No se pudo activar el micrófono.";
 
-
-    const micGain =
-      state.audio.createGain();
-
-
-    micGain.gain.value =
-      .8;
-
-
-    micSource
-      .connect(micGain)
-      .connect(state.master);
-
-
-    state.micOn =
-      true;
-
-
-    $("micButton").textContent =
-      "🎤 MIC ON";
-
-
-  }catch(error){
-
-    console.error(error);
-
-    $("bootMessage").textContent =
-      "No se pudo activar el micrófono.";
-
-  }
-
-}
-
-
-/* =====================================================
-   VOICE ID
-===================================================== */
-
-async function loadVoiceID(
-  file
-){
-
-  if(!file ||
-     !state.audio){
-
-    return;
-
-  }
-
-
-  try{
-
-    const arrayBuffer =
-      await file.arrayBuffer();
-
-
-    state.voiceBuffer =
-      await state.audio.decodeAudioData(
-        arrayBuffer
-      );
-
-
-    $("voiceStatus").textContent =
-      "ID LISTO";
-
-  }catch(error){
-
-    console.error(error);
-
-    $("voiceStatus").textContent =
-      "ERROR";
-
-  }
-
-}
-
-
-function playVoiceID(){
-
-  if(!state.voiceBuffer){
-
-    return;
-
-  }
-
-
-  const source =
-    state.audio.createBufferSource();
-
-
-  const gain =
-    state.audio.createGain();
-
-
-  source.buffer =
-    state.voiceBuffer;
-
-
-  gain.gain.value =
-    state.voiceVolume;
-
-
-  source
-    .connect(gain)
-    .connect(state.master);
-
-
-  source.start();
+    }
 
 }
 
@@ -1620,284 +2226,203 @@ function playVoiceID(){
 
 function startVisualizer(){
 
-  const canvas =
-    $("visualizer");
+    const canvas =
+        $("visualizer");
 
 
-  const context =
-    canvas.getContext("2d");
-
-
-  const data =
-    new Uint8Array(
-      state.analyser.frequencyBinCount
-    );
-
-
-  function resize(){
-
-    const ratio =
-      window.devicePixelRatio || 1;
-
-
-    canvas.width =
-      canvas.clientWidth *
-      ratio;
-
-
-    canvas.height =
-      canvas.clientHeight *
-      ratio;
-
-
-    context.setTransform(
-      ratio,
-      0,
-      0,
-      ratio,
-      0,
-      0
-    );
-
-  }
-
-
-  resize();
-
-
-  window.addEventListener(
-    "resize",
-    resize
-  );
-
-
-  function draw(){
-
-    requestAnimationFrame(
-      draw
-    );
-
-
-    const width =
-      canvas.clientWidth;
-
-
-    const height =
-      canvas.clientHeight;
-
-
-    context.clearRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-
-    state.analyser.getByteFrequencyData(
-      data
-    );
-
-
-    const bars = 80;
-
-    const barWidth =
-      width / bars;
-
-
-    for(
-      let i=0;
-      i<bars;
-      i++
-    ){
-
-      const index =
-        Math.floor(
-          i *
-          data.length /
-          bars
+    const context =
+        canvas.getContext(
+            "2d"
         );
 
 
-      const value =
-        data[index] / 255;
-
-
-      const barHeight =
-        value *
-        height *
-        .55;
-
-
-      const x =
-        i *
-        barWidth;
-
-
-      const y =
-        height -
-        barHeight;
-
-
-      const gradient =
-        context.createLinearGradient(
-          0,
-          height,
-          0,
-          y
+    const data =
+        new Uint8Array(
+            STATE.analyser
+                .frequencyBinCount
         );
 
 
-      gradient.addColorStop(
-        0,
-        "#00eaff"
-      );
+    function resize(){
+
+        const ratio =
+            window.devicePixelRatio ||
+            1;
 
 
-      gradient.addColorStop(
-        1,
-        "#8b5cff"
-      );
+        canvas.width =
+            canvas.clientWidth *
+            ratio;
 
 
-      context.fillStyle =
-        gradient;
+        canvas.height =
+            canvas.clientHeight *
+            ratio;
 
 
-      context.fillRect(
-        x,
-        y,
-        Math.max(
-          2,
-          barWidth-2
-        ),
-        barHeight
-      );
+        context.setTransform(
+            ratio,
+            0,
+            0,
+            ratio,
+            0,
+            0
+        );
 
     }
 
-  }
+
+    resize();
 
 
-  draw();
+    window.addEventListener(
+        "resize",
+        resize
+    );
 
-}
+
+    function draw(){
+
+        requestAnimationFrame(
+            draw
+        );
 
 
-/* =====================================================
-   EFECTOS VISUALES
-===================================================== */
+        const width =
+            canvas.clientWidth;
 
-function setupEffects(){
 
-  document
-    .querySelectorAll(
-      "[data-effect]"
-    )
-    .forEach(
-      button => {
+        const height =
+            canvas.clientHeight;
 
-        button.addEventListener(
-          "click",
-          () => {
 
-            button.classList.toggle(
-              "active"
+        context.clearRect(
+            0,
+            0,
+            width,
+            height
+        );
+
+
+        STATE.analyser
+            .getByteFrequencyData(
+                data
             );
 
-          }
-        );
 
-      }
-    );
-
-}
+        const bars =
+            100;
 
 
-/* =====================================================
-   ATAJOS
-===================================================== */
-
-function setupKeyboard(){
-
-  document.addEventListener(
-    "keydown",
-    event => {
-
-      if(
-        event.target.matches(
-          "input"
-        )
-      ){
-
-        return;
-
-      }
+        let total = 0;
 
 
-      if(
-        event.code === "Space"
-      ){
+        for(
+            let i=0;
+            i<bars;
+            i++
+        ){
 
-        event.preventDefault();
+            const index =
+                Math.floor(
+                    i *
+                    data.length /
+                    bars
+                );
 
 
-        const deck =
-          state.decks[
-            state.activeDeck
-          ];
+            const value =
+                data[index] /
+                255;
 
 
-        if(!deck){
+            total +=
+                value;
 
-          return;
+
+            const barHeight =
+                value *
+                height *
+                .48;
+
+
+            const x =
+                i *
+                width /
+                bars;
+
+
+            const gradient =
+                context.createLinearGradient(
+                    0,
+                    height,
+                    0,
+                    height-barHeight
+                );
+
+
+            gradient.addColorStop(
+                0,
+                "#00eaff"
+            );
+
+
+            gradient.addColorStop(
+                .5,
+                "#704cff"
+            );
+
+
+            gradient.addColorStop(
+                1,
+                "#ff3eb7"
+            );
+
+
+            context.fillStyle =
+                gradient;
+
+
+            context.fillRect(
+                x,
+                height-barHeight,
+                Math.max(
+                    2,
+                    width/bars-2
+                ),
+                barHeight
+            );
 
         }
 
 
-        if(deck.audio.paused){
-
-          playDeck(
-            state.activeDeck
-          );
-
-        }else{
-
-          deck.audio.pause();
-
-        }
-
-      }
+        const level =
+            Math.min(
+                100,
+                total /
+                bars *
+                180
+            );
 
 
-      if(
-        event.key.toLowerCase() === "a"
-      ){
-
-        playDeck("A");
-
-      }
+        $("vuA").style.height =
+            level + "%";
 
 
-      if(
-        event.key.toLowerCase() === "b"
-      ){
-
-        playDeck("B");
-
-      }
-
-
-      if(
-        event.key.toLowerCase() === "r"
-      ){
-
-        toggleRecording();
-
-      }
+        $("vuB").style.height =
+            Math.min(
+                100,
+                level *
+                (
+                    .7 +
+                    Math.random()*.5
+                )
+            ) + "%";
 
     }
-  );
+
+
+    draw();
 
 }
 
@@ -1908,323 +2433,429 @@ function setupKeyboard(){
 
 function setupEvents(){
 
-  $("startButton")
-    .addEventListener(
-      "click",
-      startSystem
-    );
-
-
-  $("loadA")
-    .addEventListener(
-      "click",
-      () => $("fileA").click()
-    );
-
-
-  $("fileA")
-    .addEventListener(
-      "change",
-      event => {
-
-        loadTrack(
-          event.target.files[0],
-          "A"
-        );
-
-      }
-    );
-
-
-  $("loadB")
-    .addEventListener(
-      "click",
-      () => $("fileB").click()
-    );
-
-
-  $("fileB")
-    .addEventListener(
-      "change",
-      event => {
-
-        loadTrack(
-          event.target.files[0],
-          "B"
-        );
-
-      }
-    );
-
-
-  $("playA")
-    .addEventListener(
-      "click",
-      () => playDeck("A")
-    );
-
-
-  $("playB")
-    .addEventListener(
-      "click",
-      () => playDeck("B")
-    );
-
-
-  $("stopA")
-    .addEventListener(
-      "click",
-      () => stopDeck("A")
-    );
-
-
-  $("stopB")
-    .addEventListener(
-      "click",
-      () => stopDeck("B")
-    );
-
-
-  ["A","B"].forEach(
-    deckName => {
-
-      $("volume"+deckName)
+    $("startButton")
         .addEventListener(
-          "input",
-          () =>
-            updateDeckVolume(
-              deckName
+            "click",
+            startSystem
+        );
+
+
+    $("loadA")
+        .addEventListener(
+            "click",
+            () =>
+                $("fileA").click()
+        );
+
+
+    $("fileA")
+        .addEventListener(
+            "change",
+            event =>
+                loadTrack(
+                    event.target.files[0],
+                    "A"
+                )
+        );
+
+
+    $("loadB")
+        .addEventListener(
+            "click",
+            () =>
+                $("fileB").click()
+        );
+
+
+    $("fileB")
+        .addEventListener(
+            "change",
+            event =>
+                loadTrack(
+                    event.target.files[0],
+                    "B"
+                )
+        );
+
+
+    $("playA")
+        .addEventListener(
+            "click",
+            () =>
+                playDeck("A")
+        );
+
+
+    $("playB")
+        .addEventListener(
+            "click",
+            () =>
+                playDeck("B")
+        );
+
+
+    $("stopA")
+        .addEventListener(
+            "click",
+            () =>
+                stopDeck("A")
+        );
+
+
+    $("stopB")
+        .addEventListener(
+            "click",
+            () =>
+                stopDeck("B")
+        );
+
+
+    $("volumeA")
+        .addEventListener(
+            "input",
+            () =>
+                updateVolume("A")
+        );
+
+
+    $("volumeB")
+        .addEventListener(
+            "input",
+            () =>
+                updateVolume("B")
+        );
+
+
+    $("pitchA")
+        .addEventListener(
+            "input",
+            () =>
+                updatePitch("A")
+        );
+
+
+    $("pitchB")
+        .addEventListener(
+            "input",
+            () =>
+                updatePitch("B")
+        );
+
+
+    $("seekA")
+        .addEventListener(
+            "input",
+            () =>
+                updateSeek("A")
+        );
+
+
+    $("seekB")
+        .addEventListener(
+            "input",
+            () =>
+                updateSeek("B")
+        );
+
+
+    $("master")
+        .addEventListener(
+            "input",
+            updateMaster
+        );
+
+
+    $("crossfader")
+        .addEventListener(
+            "input",
+            updateCrossfader
+        );
+
+
+    [
+        "eqHigh",
+        "eqMid",
+        "eqLow"
+    ].forEach(
+        id =>
+            $(id).addEventListener(
+                "input",
+                updateEQ
             )
+    );
+
+
+    document
+        .querySelectorAll(
+            "[data-effect]"
+        )
+        .forEach(
+            button => {
+
+                button.addEventListener(
+                    "click",
+                    () =>
+                        toggleEffect(
+                            button.dataset.deck,
+                            button.dataset.effect
+                        )
+                );
+
+            }
         );
 
 
-      $("pitch"+deckName)
+    $("fxMixA")
         .addEventListener(
-          "input",
-          () =>
-            updatePitch(
-              deckName
-            )
+            "input",
+            () =>
+                updateFXMix("A")
         );
 
 
-      $("seek"+deckName)
+    $("fxMixB")
         .addEventListener(
-          "input",
-          () =>
-            seekDeck(
-              deckName
-            )
+            "input",
+            () =>
+                updateFXMix("B")
         );
 
-    }
-  );
 
-
-  $("master")
-    .addEventListener(
-      "input",
-      updateMaster
-    );
-
-
-  $("crossfader")
-    .addEventListener(
-      "input",
-      updateCrossfader
-    );
-
-
-  ["high","mid","low"].forEach(
-    control => {
-
-      $(control)
+    $("autoMixButton")
         .addEventListener(
-          "input",
-          updateEQ
+            "click",
+            toggleAutoMix
         );
 
-    }
-  );
 
-
-  $("smartNext")
-    .addEventListener(
-      "click",
-      smartNext
-    );
-
-
-  $("autoDj")
-    .addEventListener(
-      "click",
-      toggleAutoDJ
-    );
-
-
-  $("shuffle")
-    .addEventListener(
-      "click",
-      shuffleLibrary
-    );
-
-
-  $("addMusic")
-    .addEventListener(
-      "click",
-      () => $("musicFiles").click()
-    );
-
-
-  $("musicFiles")
-    .addEventListener(
-      "change",
-      event => {
-
-        addMusicFiles(
-          event.target.files
+    $("autoVoiceButton")
+        .addEventListener(
+            "click",
+            toggleAutoVoice
         );
 
-      }
-    );
 
-
-  $("clearLibrary")
-    .addEventListener(
-      "click",
-      () => {
-
-        state.library =
-          [];
-
-        renderLibrary();
-
-      }
-    );
-
-
-  $("recordButton")
-    .addEventListener(
-      "click",
-      toggleRecording
-    );
-
-
-  $("micButton")
-    .addEventListener(
-      "click",
-      toggleMicrophone
-    );
-
-
-  $("loadVoice")
-    .addEventListener(
-      "click",
-      () => $("voiceFile").click()
-    );
-
-
-  $("voiceFile")
-    .addEventListener(
-      "change",
-      event => {
-
-        loadVoiceID(
-          event.target.files[0]
+    $("smartNext")
+        .addEventListener(
+            "click",
+            smartNext
         );
 
-      }
-    );
+
+    $("shuffleButton")
+        .addEventListener(
+            "click",
+            shuffleLibrary
+        );
 
 
-  $("playVoice")
-    .addEventListener(
-      "click",
-      playVoiceID
-    );
+    $("addMusic")
+        .addEventListener(
+            "click",
+            () =>
+                $("musicFiles").click()
+        );
 
 
-  $("voiceVolume")
-    .addEventListener(
-      "input",
-      event => {
+    $("musicFiles")
+        .addEventListener(
+            "change",
+            event =>
+                addMusicFiles(
+                    event.target.files
+                )
+        );
 
-        state.voiceVolume =
-          Number(
-            event.target.value
-          ) / 100;
 
-      }
+    $("clearLibrary")
+        .addEventListener(
+            "click",
+            () => {
+
+                STATE.library =
+                    [];
+
+                renderLibrary();
+
+            }
+        );
+
+
+    $("recordButton")
+        .addEventListener(
+            "click",
+            toggleRecording
+        );
+
+
+    $("micButton")
+        .addEventListener(
+            "click",
+            toggleMicrophone
+        );
+
+
+    $("loadVoice")
+        .addEventListener(
+            "click",
+            () =>
+                $("voiceFile").click()
+        );
+
+
+    $("voiceFile")
+        .addEventListener(
+            "change",
+            async event => {
+
+                await loadVoiceID(
+                    event.target.files[0]
+                );
+
+            }
+        );
+
+
+    $("playVoice")
+        .addEventListener(
+            "click",
+            playVoiceID
+        );
+
+}
+
+
+/* =====================================================
+   ATAJOS
+===================================================== */
+
+function setupKeyboard(){
+
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            if(
+                event.target.matches(
+                    "input,select"
+                )
+            ){
+
+                return;
+
+            }
+
+
+            if(
+                event.code === "Space"
+            ){
+
+                event.preventDefault();
+
+
+                const deck =
+                    STATE.decks[
+                        STATE.activeDeck
+                    ];
+
+
+                if(!deck){
+
+                    return;
+
+                }
+
+
+                if(
+                    deck.audio.paused
+                ){
+
+                    playDeck(
+                        STATE.activeDeck
+                    );
+
+                }else{
+
+                    deck.audio.pause();
+
+                }
+
+            }
+
+
+            if(
+                event.key.toLowerCase()
+                === "a"
+            ){
+
+                playDeck("A");
+
+            }
+
+
+            if(
+                event.key.toLowerCase()
+                === "b"
+            ){
+
+                playDeck("B");
+
+            }
+
+
+            if(
+                event.key.toLowerCase()
+                === "r"
+            ){
+
+                toggleRecording();
+
+            }
+
+        }
     );
 
 }
 
 
 /* =====================================================
-   ARRANQUE SEGURO
+   ARRANQUE
 ===================================================== */
 
-function bootApplication(){
+function initialize(){
 
-  /*
-     La aplicación ya está visible
-     aunque el audio todavía no haya
-     sido iniciado.
-  */
-
-  updateClock();
-
-  setInterval(
-    updateClock,
-    1000
-  );
+    updateClock();
 
 
-  renderLibrary();
+    setInterval(
+        updateClock,
+        1000
+    );
 
-  setupEvents();
 
-  setupEffects();
+    renderLibrary();
 
-  setupKeyboard();
+
+    setupEvents();
+
+
+    setupKeyboard();
 
 }
 
-
-/* =====================================================
-   DOM READY
-===================================================== */
 
 if(
-  document.readyState ===
-  "loading"
+    document.readyState ===
+    "loading"
 ){
 
-  document.addEventListener(
-    "DOMContentLoaded",
-    bootApplication
-  );
+    document.addEventListener(
+        "DOMContentLoaded",
+        initialize
+    );
 
 }else{
 
-  bootApplication();
+    initialize();
 
 }
-
-
-/* =====================================================
-   ERRORES
-===================================================== */
-
-window.addEventListener(
-  "error",
-  event => {
-
-    console.error(
-      "Error DJ HUMBERTO:",
-      event.error ||
-      event.message
-    );
-
-  }
-);
