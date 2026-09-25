@@ -1,2675 +1,4109 @@
+/* =========================================================
+   HC PRO DJ HUMBERTO 3.2
+   DJ IDENTITY EDITION
+========================================================= */
+
 "use strict";
 
-/*
- HC PRO DJ HUMBERTO 3.1
- Motor principal:
- - Dual Deck
- - Web Audio
- - EQ
- - Filter
- - Echo
- - Flanger
- - Reverb
- - Visualizer
- - Smart DJ
- - Biblioteca
- - Auto DJ
- - Crossfader
- - Micrófono
- - Grabación
-*/
 
-document.addEventListener("DOMContentLoaded", () => {
+/* =========================================================
+   ESTADO PRINCIPAL
+========================================================= */
 
-  const $ = id => document.getElementById(id);
+const state = {
 
-  const state = {
-    started: false,
-    active: "A",
-    autoDJ: false,
-    transition: "crossfade",
-    library: [],
-    history: [],
-    smartQueue: [],
-    recorder: null,
-    recordingChunks: [],
-    micStream: null,
-    micSource: null,
-    micGainNode: null,
-    mediaRecorderReady: false,
-    autoTransitionRunning: false
+  started: false,
+
+  activeDeck: "A",
+
+  autoDJ: false,
+
+  transition: "crossfade",
+
+  library: [],
+
+  history: [],
+
+  smartQueue: [],
+
+  voiceIds: [],
+
+  voiceHistory: [],
+
+  currentVoice: -1,
+
+  autoId: false,
+
+  idInterval: 10,
+
+  idTimer: null,
+
+  idNextTime: null,
+
+  jingleBank: [],
+
+  recorder: null,
+
+  recordingChunks: [],
+
+  micStream: null,
+
+  micSource: null,
+
+  micEnabled: false,
+
+  autoTransitionRunning: false
+
+};
+
+
+/* =========================================================
+   AUDIO ENGINE
+========================================================= */
+
+let audioCtx = null;
+
+let masterGain = null;
+
+let musicBus = null;
+
+let masterAnalyser = null;
+
+let recordDestination = null;
+
+let micGainNode = null;
+
+let decks = {};
+
+let voiceGain = null;
+
+let jingleGain = null;
+
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const $ = id => document.getElementById(id);
+
+function clamp(value, min, max) {
+
+  return Math.max(
+    min,
+    Math.min(max, value)
+  );
+
+}
+
+
+function formatTime(seconds) {
+
+  if (!Number.isFinite(seconds)) {
+    return "00:00";
+  }
+
+  seconds = Math.max(0, Math.floor(seconds));
+
+  const min = Math.floor(seconds / 60);
+
+  const sec = seconds % 60;
+
+  return (
+    String(min).padStart(2,"0") +
+    ":" +
+    String(sec).padStart(2,"0")
+  );
+
+}
+
+
+function titleFromFile(file) {
+
+  return file.name
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[_-]+/g," ")
+    .trim();
+
+}
+
+
+/* =========================================================
+   AUDIO ENGINE START
+========================================================= */
+
+async function startAudioEngine() {
+
+  if (audioCtx) {
+
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+
+    return;
+
+  }
+
+
+  audioCtx = new (
+    window.AudioContext ||
+    window.webkitAudioContext
+  )();
+
+
+  masterGain =
+    audioCtx.createGain();
+
+  masterGain.gain.value = 0.8;
+
+
+  musicBus =
+    audioCtx.createGain();
+
+  musicBus.gain.value = 1;
+
+
+  voiceGain =
+    audioCtx.createGain();
+
+  voiceGain.gain.value = 1;
+
+
+  jingleGain =
+    audioCtx.createGain();
+
+  jingleGain.gain.value = 1;
+
+
+  masterAnalyser =
+    audioCtx.createAnalyser();
+
+  masterAnalyser.fftSize = 1024;
+
+
+  recordDestination =
+    audioCtx.createMediaStreamDestination();
+
+
+  musicBus.connect(masterGain);
+
+  voiceGain.connect(masterGain);
+
+  jingleGain.connect(masterGain);
+
+  masterGain.connect(masterAnalyser);
+
+  masterAnalyser.connect(audioCtx.destination);
+
+  masterAnalyser.connect(recordDestination);
+
+
+  decks.A =
+    createDeck("A");
+
+  decks.B =
+    createDeck("B");
+
+
+  await audioCtx.resume();
+
+}
+
+
+/* =========================================================
+   CREATE DECK
+========================================================= */
+
+function createDeck(id) {
+
+  const media =
+    $("media" + id);
+
+  const source =
+    audioCtx.createMediaElementSource(media);
+
+
+  const inputGain =
+    audioCtx.createGain();
+
+  inputGain.gain.value = 1;
+
+
+  const low =
+    audioCtx.createBiquadFilter();
+
+  low.type = "lowshelf";
+
+  low.frequency.value = 180;
+
+
+  const mid =
+    audioCtx.createBiquadFilter();
+
+  mid.type = "peaking";
+
+  mid.frequency.value = 1000;
+
+  mid.Q.value = 0.8;
+
+
+  const high =
+    audioCtx.createBiquadFilter();
+
+  high.type = "highshelf";
+
+  high.frequency.value = 5000;
+
+
+  const filter =
+    audioCtx.createBiquadFilter();
+
+  filter.type = "lowpass";
+
+  filter.frequency.value = 22000;
+
+
+  const delay =
+    audioCtx.createDelay(2);
+
+  delay.delayTime.value = .22;
+
+
+  const delayFeedback =
+    audioCtx.createGain();
+
+  delayFeedback.gain.value = .25;
+
+
+  const delayWet =
+    audioCtx.createGain();
+
+  delayWet.gain.value = 0;
+
+
+  const flanger =
+    audioCtx.createDelay(.05);
+
+  flanger.delayTime.value = .006;
+
+
+  const flangerWet =
+    audioCtx.createGain();
+
+  flangerWet.gain.value = 0;
+
+
+  const flangerLfo =
+    audioCtx.createOscillator();
+
+  const flangerDepth =
+    audioCtx.createGain();
+
+  flangerLfo.frequency.value = .35;
+
+  flangerDepth.gain.value = .003;
+
+
+  flangerLfo.connect(
+    flangerDepth
+  );
+
+  flangerDepth.connect(
+    flanger.delayTime
+  );
+
+  flangerLfo.start();
+
+
+  const convolver =
+    audioCtx.createConvolver();
+
+  convolver.buffer =
+    createImpulseResponse(
+      audioCtx,
+      2.5,
+      2
+    );
+
+
+  const reverbWet =
+    audioCtx.createGain();
+
+  reverbWet.gain.value = 0;
+
+
+  const channelGain =
+    audioCtx.createGain();
+
+  channelGain.gain.value = .5;
+
+
+  const analyser =
+    audioCtx.createAnalyser();
+
+  analyser.fftSize = 512;
+
+
+  source.connect(inputGain);
+
+  inputGain.connect(low);
+
+  low.connect(mid);
+
+  mid.connect(high);
+
+  high.connect(filter);
+
+
+  filter.connect(channelGain);
+
+  filter.connect(delay);
+
+  delay.connect(delayFeedback);
+
+  delayFeedback.connect(delay);
+
+  delay.connect(delayWet);
+
+  delayWet.connect(channelGain);
+
+
+  filter.connect(flanger);
+
+  flanger.connect(flangerWet);
+
+  flangerWet.connect(channelGain);
+
+
+  filter.connect(convolver);
+
+  convolver.connect(reverbWet);
+
+  reverbWet.connect(channelGain);
+
+
+  channelGain.connect(analyser);
+
+  analyser.connect(musicBus);
+
+
+  media.addEventListener(
+    "play",
+    () => {
+
+      updateDeckPlaying(
+        id,
+        true
+      );
+
+      state.activeDeck = id;
+
+      $("activeDeckLabel").textContent =
+        "DECK " + id;
+
+    }
+  );
+
+
+  media.addEventListener(
+    "pause",
+    () => {
+
+      updateDeckPlaying(
+        id,
+        false
+      );
+
+    }
+  );
+
+
+  media.addEventListener(
+    "ended",
+    () => {
+
+      updateDeckPlaying(
+        id,
+        false
+      );
+
+      onDeckEnded(id);
+
+    }
+  );
+
+
+  media.addEventListener(
+    "timeupdate",
+    () => {
+
+      updateDeckProgress(id);
+
+    }
+  );
+
+
+  media.addEventListener(
+    "loadedmetadata",
+    () => {
+
+      updateDeckProgress(id);
+
+    }
+  );
+
+
+  return {
+
+    id,
+
+    media,
+
+    source,
+
+    inputGain,
+
+    low,
+
+    mid,
+
+    high,
+
+    filter,
+
+    delayWet,
+
+    flangerWet,
+
+    reverbWet,
+
+    channelGain,
+
+    analyser
+
   };
 
-  let audioCtx = null;
-  let masterGain = null;
-  let masterAnalyser = null;
-  let recordDestination = null;
-
-  const decks = {};
-
-  function setStatus(message) {
-    const el = $("systemMessage");
-    if (el) el.textContent = message;
-  }
-
-  function formatTime(seconds) {
-    if (!Number.isFinite(seconds)) return "00:00";
-
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-
-    return String(m).padStart(2, "0") + ":" +
-           String(s).padStart(2, "0");
-  }
-
-  function escapeHTML(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function parseFilename(filename) {
-
-    let name = filename.replace(/\.[^/.]+$/, "");
-
-    let artist = "DJ HUMBERTO";
-    let title = name;
-
-    if (name.includes(" - ")) {
-      const parts = name.split(" - ");
-      artist = parts.shift().trim() || artist;
-      title = parts.join(" - ").trim() || title;
-    }
-
-    return {
-      artist,
-      title,
-      genre: "General"
-    };
-  }
+}
 
 
-  /*
-   --------------------------------------------------
-   AUDIO ENGINE
-   --------------------------------------------------
-  */
+/* =========================================================
+   IMPULSE RESPONSE
+========================================================= */
 
-  async function startAudioEngine() {
+function createImpulseResponse(
+  context,
+  duration,
+  decay
+) {
 
-    if (audioCtx) {
-      if (audioCtx.state === "suspended") {
-        await audioCtx.resume();
-      }
-      return;
-    }
+  const length =
+    context.sampleRate *
+    duration;
 
-    try {
-
-      audioCtx = new (
-        window.AudioContext ||
-        window.webkitAudioContext
-      )();
-
-      masterGain = audioCtx.createGain();
-      masterAnalyser = audioCtx.createAnalyser();
-
-      masterAnalyser.fftSize = 2048;
-      masterAnalyser.smoothingTimeConstant = .75;
-
-      masterGain.gain.value =
-        parseFloat($("masterVolume").value);
-
-      recordDestination =
-        audioCtx.createMediaStreamDestination();
-
-      masterGain.connect(masterAnalyser);
-      masterAnalyser.connect(audioCtx.destination);
-      masterGain.connect(recordDestination);
-
-      createDeck("A");
-      createDeck("B");
-
-      setStatus("MOTOR DE AUDIO ACTIVO");
-
-    } catch (error) {
-
-      console.error(error);
-      setStatus("ERROR DE AUDIO: " + error.message);
-    }
-  }
-
-
-  function createDeck(id) {
-
-    const media = new Audio();
-
-    media.preload = "metadata";
-    media.crossOrigin = "anonymous";
-
-    const source =
-      audioCtx.createMediaElementSource(media);
-
-    const inputGain = audioCtx.createGain();
-
-    const low = audioCtx.createBiquadFilter();
-    low.type = "lowshelf";
-    low.frequency.value = 200;
-
-    const mid = audioCtx.createBiquadFilter();
-    mid.type = "peaking";
-    mid.frequency.value = 1000;
-    mid.Q.value = 1;
-
-    const high = audioCtx.createBiquadFilter();
-    high.type = "highshelf";
-    high.frequency.value = 6000;
-
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 20000;
-    filter.Q.value = .7;
-
-    const delay = audioCtx.createDelay(2);
-    const feedback = audioCtx.createGain();
-    const delayWet = audioCtx.createGain();
-
-    delay.delayTime.value = .28;
-    feedback.gain.value = .25;
-    delayWet.gain.value = 0;
-
-    delay.connect(feedback);
-    feedback.connect(delay);
-    delay.connect(delayWet);
-
-    const flangerDelay = audioCtx.createDelay(.1);
-    const flangerWet = audioCtx.createGain();
-    const flangerLFO = audioCtx.createOscillator();
-    const flangerDepth = audioCtx.createGain();
-
-    flangerDelay.delayTime.value = .005;
-    flangerWet.gain.value = 0;
-    flangerDepth.gain.value = .003;
-
-    flangerLFO.frequency.value = .25;
-    flangerLFO.connect(flangerDepth);
-    flangerDepth.connect(flangerDelay.delayTime);
-    flangerLFO.start();
-
-    const convolver = audioCtx.createConvolver();
-    const reverbWet = audioCtx.createGain();
-
-    reverbWet.gain.value = 0;
-    convolver.buffer = createImpulseResponse(1.8, 2.5);
-
-    const channelGain = audioCtx.createGain();
-
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = .75;
-
-    source.connect(inputGain);
-    inputGain.connect(low);
-    low.connect(mid);
-    mid.connect(high);
-    high.connect(filter);
-
-    filter.connect(channelGain);
-
-    filter.connect(delay);
-    delayWet.connect(channelGain);
-
-    filter.connect(flangerDelay);
-    flangerDelay.connect(flangerWet);
-    flangerWet.connect(channelGain);
-
-    filter.connect(convolver);
-    convolver.connect(reverbWet);
-    reverbWet.connect(channelGain);
-
-    channelGain.connect(analyser);
-    analyser.connect(masterGain);
-
-    decks[id] = {
-      id,
-      media,
-      source,
-      inputGain,
-      low,
-      mid,
-      high,
-      filter,
-      delay,
-      delayWet,
-      flangerWet,
-      flangerDelay,
-      reverbWet,
-      analyser,
-      channelGain,
-      file: null,
-      url: null,
-      libraryId: null,
-      objectURL: null
-    };
-
-    media.addEventListener("loadedmetadata", () => {
-      updateDeckDisplay(id);
-    });
-
-    media.addEventListener("timeupdate", () => {
-      updateDeckDisplay(id);
-      checkAutoDJ(id);
-    });
-
-    media.addEventListener("play", () => {
-      updateVinyl(id, true);
-      updateVideo(id);
-    });
-
-    media.addEventListener("pause", () => {
-      updateVinyl(id, false);
-    });
-
-    media.addEventListener("ended", () => {
-      updateVinyl(id, false);
-
-      if (state.autoDJ) {
-        startAutoTransition(id);
-      }
-    });
-
-    media.addEventListener("error", () => {
-      setStatus("No se pudo reproducir el archivo del Deck " + id);
-    });
-  }
-
-
-  function createImpulseResponse(duration, decay) {
-
-    const rate = audioCtx.sampleRate;
-    const length = rate * duration;
-    const impulse = audioCtx.createBuffer(
+  const impulse =
+    context.createBuffer(
       2,
       length,
-      rate
+      context.sampleRate
     );
 
-    for (let channel = 0; channel < 2; channel++) {
-
-      const data = impulse.getChannelData(channel);
-
-      for (let i = 0; i < length; i++) {
-        data[i] =
-          (Math.random() * 2 - 1) *
-          Math.pow(1 - i / length, decay);
-      }
-    }
-
-    return impulse;
-  }
-
-
-  /*
-   --------------------------------------------------
-   FILE LOADING
-   --------------------------------------------------
-  */
-
-  async function loadFileToDeck(id, file, libraryId = null) {
-
-    if (!file) return;
-
-    await startAudioEngine();
-
-    const deck = decks[id];
-
-    if (!deck) return;
-
-    if (deck.objectURL) {
-      URL.revokeObjectURL(deck.objectURL);
-    }
-
-    const url = URL.createObjectURL(file);
-
-    deck.file = file;
-    deck.objectURL = url;
-    deck.libraryId = libraryId;
-
-    deck.media.src = url;
-    deck.media.load();
-
-    const info = parseFilename(file.name);
-
-    $(id.toLowerCase() + "Title").textContent =
-      info.artist + " — " + info.title;
-
-    $(id.toLowerCase() + "Bpm").textContent =
-      "BPM --";
-
-    setStatus(
-      "CARGADO EN DECK " + id + ": " + file.name
-    );
-
-    state.active = id;
-
-    updateActiveLabel();
-    updateVideo(id);
-  }
-
-
-  /*
-   --------------------------------------------------
-   DECK CONTROLS
-   --------------------------------------------------
-  */
-
-  async function playDeck(id) {
-
-    await startAudioEngine();
-
-    const deck = decks[id];
-
-    if (!deck || !deck.media.src) {
-      setStatus("Primero cargá un archivo en Deck " + id);
-      return;
-    }
-
-    try {
-
-      await deck.media.play();
-
-      state.active = id;
-
-      updateActiveLabel();
-      updateNowPlaying(id);
-
-      setStatus("REPRODUCIENDO DECK " + id);
-
-    } catch (error) {
-
-      console.error(error);
-      setStatus("El navegador bloqueó la reproducción.");
-    }
-  }
-
-
-  function pauseDeck(id) {
-
-    const deck = decks[id];
-
-    if (!deck) return;
-
-    deck.media.pause();
-    setStatus("PAUSA DECK " + id);
-  }
-
-
-  function stopDeck(id) {
-
-    const deck = decks[id];
-
-    if (!deck) return;
-
-    deck.media.pause();
-    deck.media.currentTime = 0;
-
-    updateVinyl(id, false);
-
-    setStatus("STOP DECK " + id);
-  }
-
-
-  function updateDeckDisplay(id) {
-
-    const deck = decks[id];
-
-    if (!deck) return;
-
-    const prefix = id.toLowerCase();
-
-    const duration = deck.media.duration || 0;
-    const current = deck.media.currentTime || 0;
-
-    const progress =
-      duration > 0
-        ? (current / duration) * 100
-        : 0;
-
-    const progressEl = $(prefix + "Progress");
-
-    if (progressEl) {
-      progressEl.value = progress;
-    }
-
-    const timeEl = $(prefix + "Time");
-
-    if (timeEl) {
-      timeEl.textContent =
-        formatTime(current) +
-        " / " +
-        formatTime(duration);
-    }
-  }
-
-
-  function updateVinyl(id, spinning) {
-
-    const vinyl = $("vinyl" + id);
-
-    if (!vinyl) return;
-
-    vinyl.classList.toggle("spinning", spinning);
-  }
-
-
-  function updateNowPlaying(id) {
-
-    const deck = decks[id];
-
-    if (!deck || !deck.file) return;
-
-    const info = parseFilename(deck.file.name);
-
-    $("nowTitle").textContent =
-      info.artist + " — " + info.title;
-
-    $("smartCurrentTrack").textContent =
-      info.artist + " — " + info.title;
-
-    if (deck.libraryId) {
-
-      const item =
-        state.library.find(
-          x => x.id === deck.libraryId
+  for (
+    let channel = 0;
+    channel < impulse.numberOfChannels;
+    channel++
+  ) {
+
+    const data =
+      impulse.getChannelData(channel);
+
+    for (
+      let i = 0;
+      i < length;
+      i++
+    ) {
+
+      data[i] =
+        (
+          Math.random() * 2 - 1
+        ) *
+        Math.pow(
+          1 - i / length,
+          decay
         );
 
-      if (item) {
-        updateSmartCurrent(item);
-      }
     }
+
   }
 
+  return impulse;
 
-  function updateActiveLabel() {
+}
 
-    $("activeDeckLabel").textContent =
-      "DECK " + state.active + " ACTIVO";
+
+/* =========================================================
+   LOAD DECK
+========================================================= */
+
+async function loadFileToDeck(
+  id,
+  file
+) {
+
+  if (!audioCtx) {
+    await startAudioEngine();
   }
 
+  const deck =
+    decks[id];
 
-  function updateVideo(id) {
+  const url =
+    URL.createObjectURL(file);
 
-    const deck = decks[id];
+  deck.media.src = url;
 
-    if (!deck || !deck.file) return;
+  deck.media.load();
 
-    const video = $("videoPlayer");
-    const placeholder = $("screenPlaceholder");
+  $("" + id.toLowerCase() + "Title").textContent =
+    titleFromFile(file);
 
-    if (deck.file.type.startsWith("video/")) {
+  $("deck" + id + "State").textContent =
+    "LOADED";
 
-      video.src = deck.objectURL;
-      video.muted = true;
-      video.currentTime = deck.media.currentTime;
+  updateNowPlaying();
 
-      placeholder.style.display = "none";
+  const libraryItem = {
+    id:
+      "deck-" +
+      id +
+      "-" +
+      Date.now(),
+
+    name:
+      titleFromFile(file),
+
+    file,
+
+    url,
+
+    bpm: null,
+
+    key: null,
+
+    energy: null
+  };
+
+  analyzeTrack(
+    libraryItem
+  ).then(() => {
+
+    if (id === "A") {
+
+      $("aBpm").textContent =
+        libraryItem.bpm || "--";
+
+      $("aKey").textContent =
+        libraryItem.key || "--";
+
+      $("aEnergy").textContent =
+        libraryItem.energy != null
+          ? libraryItem.energy
+          : "--";
 
     } else {
 
-      video.removeAttribute("src");
-      video.load();
+      $("bBpm").textContent =
+        libraryItem.bpm || "--";
 
-      placeholder.style.display = "grid";
+      $("bKey").textContent =
+        libraryItem.key || "--";
+
+      $("bEnergy").textContent =
+        libraryItem.energy != null
+          ? libraryItem.energy
+          : "--";
+
     }
+
+    updateSmartCurrent();
+
+  });
+
+}
+
+
+/* =========================================================
+   PLAY / PAUSE / STOP
+========================================================= */
+
+async function playDeck(id) {
+
+  if (!audioCtx) {
+    await startAudioEngine();
+  }
+
+  const deck =
+    decks[id];
+
+  if (!deck.media.src) {
+
+    setStatus(
+      "Cargá una canción en DECK " + id
+    );
+
+    return;
+
+  }
+
+  try {
+
+    await deck.media.play();
+
+    state.activeDeck = id;
+
+    updateNowPlaying();
+
+  } catch (error) {
+
+    setStatus(
+      "Presioná PLAY nuevamente"
+    );
+
+  }
+
+}
+
+
+function pauseDeck(id) {
+
+  decks[id].media.pause();
+
+}
+
+
+function stopDeck(id) {
+
+  const media =
+    decks[id].media;
+
+  media.pause();
+
+  media.currentTime = 0;
+
+}
+
+
+/* =========================================================
+   DECK UI
+========================================================= */
+
+function updateDeckPlaying(
+  id,
+  playing
+) {
+
+  const vinyl =
+    $("vinyl" + id);
+
+  const stateEl =
+    $("deck" + id + "State");
+
+  if (playing) {
+
+    vinyl.classList.add(
+      "playing"
+    );
+
+    stateEl.textContent =
+      "PLAYING";
+
+  } else {
+
+    vinyl.classList.remove(
+      "playing"
+    );
+
+    stateEl.textContent =
+      "PAUSED";
+
+  }
+
+}
+
+
+function updateDeckProgress(id) {
+
+  const media =
+    decks[id].media;
+
+  const progress =
+    $("" + id.toLowerCase() + "Progress");
+
+  const time =
+    $("" + id.toLowerCase() + "Time");
+
+  if (!media.duration) {
+
+    progress.value = 0;
+
+    time.textContent =
+      "00:00 / 00:00";
+
+    return;
+
+  }
+
+  progress.value =
+    (
+      media.currentTime /
+      media.duration
+    ) * 100;
+
+  time.textContent =
+    formatTime(media.currentTime) +
+    " / " +
+    formatTime(media.duration);
+
+}
+
+
+function updateNowPlaying() {
+
+  const id =
+    state.activeDeck;
+
+  const media =
+    decks[id]?.media;
+
+  if (!media) return;
+
+  const title =
+    media.dataset.title ||
+    media.src
+      ? getDeckTitle(id)
+      : "ESPERANDO MÚSICA...";
+
+  $("nowTitle").textContent =
+    title || "ESPERANDO MÚSICA...";
+
+  $("screenTrack").textContent =
+    title || "HC PRO DJ HUMBERTO";
+
+}
+
+
+function getDeckTitle(id) {
+
+  const element =
+    $("" + id.toLowerCase() + "Title");
+
+  return element
+    ? element.textContent
+    : "";
+
+}
+
+
+/* =========================================================
+   CROSSFADE
+========================================================= */
+
+function updateCrossfader() {
+
+  if (!decks.A || !decks.B) {
+    return;
+  }
+
+  const value =
+    parseFloat(
+      $("crossfader").value
+    );
+
+
+  let gainA;
+  let gainB;
+
+
+  if (
+    state.transition ===
+    "crossfade"
+  ) {
+
+    gainA =
+      Math.cos(
+        value *
+        Math.PI /
+        2
+      );
+
+    gainB =
+      Math.cos(
+        (1 - value) *
+        Math.PI /
+        2
+      );
+
+  } else {
+
+    gainA =
+      1 - value;
+
+    gainB =
+      value;
+
   }
 
 
-  /*
-   --------------------------------------------------
-   CONTROLS / EQ
-   --------------------------------------------------
-  */
-
-  function connectControl(id, elementId, callback) {
-
-    const element = $(elementId);
-
-    if (!element) return;
-
-    element.addEventListener("input", () => {
-      callback(parseFloat(element.value));
-    });
-  }
+  decks.A.channelGain.gain.value =
+    gainA *
+    parseFloat(
+      $("aGain").value
+    ) *
+    .75;
 
 
-  function setupDeckControls(id) {
+  decks.B.channelGain.gain.value =
+    gainB *
+    parseFloat(
+      $("bGain").value
+    ) *
+    .75;
 
-    const prefix = id.toLowerCase();
-
-    connectControl(
-      id,
-      prefix + "Gain",
-      value => {
-        if (decks[id]) {
-          decks[id].inputGain.gain.value = value;
-        }
-      }
-    );
-
-    connectControl(
-      id,
-      prefix + "Pitch",
-      value => {
-        if (decks[id]) {
-          decks[id].media.playbackRate = value;
-        }
-      }
-    );
-
-    connectControl(
-      id,
-      prefix + "Low",
-      value => {
-        if (decks[id]) {
-          decks[id].low.gain.value = value;
-        }
-      }
-    );
-
-    connectControl(
-      id,
-      prefix + "Mid",
-      value => {
-        if (decks[id]) {
-          decks[id].mid.gain.value = value;
-        }
-      }
-    );
-
-    connectControl(
-      id,
-      prefix + "High",
-      value => {
-        if (decks[id]) {
-          decks[id].high.gain.value = value;
-        }
-      }
-    );
-
-    connectControl(
-      id,
-      prefix + "Filter",
-      value => {
-
-        if (!decks[id]) return;
-
-        const min = 500;
-        const max = 20000;
-
-        decks[id].filter.frequency.value =
-          min +
-          (max - min) * value;
-      }
-    );
-  }
+}
 
 
-  /*
-   --------------------------------------------------
-   CROSSFADER
-   --------------------------------------------------
-  */
-
-  function updateCrossfader(value) {
-
-    if (!decks.A || !decks.B) return;
-
-    const angle = value * Math.PI / 2;
-
-    decks.A.channelGain.gain.value =
-      Math.cos(angle);
-
-    decks.B.channelGain.gain.value =
-      Math.sin(angle);
-  }
-
-
-  /*
-   --------------------------------------------------
+/* =========================================================
    EFFECTS
-   --------------------------------------------------
-  */
+========================================================= */
 
-  function toggleFX(id, fx) {
+document.addEventListener(
+  "click",
+  event => {
 
-    const deck = decks[id];
-
-    if (!deck) return;
-
-    if (fx === "echo") {
-
-      const active =
-        deck.delayWet.gain.value > 0;
-
-      deck.delayWet.gain.value =
-        active ? 0 : .35;
-
-      setStatus(
-        "ECHO " +
-        (active ? "OFF" : "ON") +
-        " — DECK " + id
+    const button =
+      event.target.closest(
+        ".fx-button"
       );
-    }
 
-    if (fx === "flanger") {
+    if (!button) return;
 
-      const active =
-        deck.flangerWet.gain.value > 0;
+    const deckId =
+      button.dataset.deck;
 
-      deck.flangerWet.gain.value =
-        active ? 0 : .35;
+    const fx =
+      button.dataset.fx;
 
-      setStatus(
-        "FLANGER " +
-        (active ? "OFF" : "ON") +
-        " — DECK " + id
-      );
-    }
+    toggleFX(
+      deckId,
+      fx,
+      button
+    );
 
-    if (fx === "reverb") {
+  }
+);
 
-      const active =
-        deck.reverbWet.gain.value > 0;
 
-      deck.reverbWet.gain.value =
-        active ? 0 : .3;
+function toggleFX(
+  id,
+  fx,
+  button
+) {
 
-      setStatus(
-        "REVERB " +
-        (active ? "OFF" : "ON") +
-        " — DECK " + id
-      );
-    }
+  const deck =
+    decks[id];
+
+  if (!deck) return;
+
+  const active =
+    button.classList.toggle(
+      "active"
+    );
+
+
+  if (fx === "filter") {
+
+    deck.filter.frequency.value =
+      active
+        ? 1000
+        : 22000;
+
   }
 
 
-  /*
-   --------------------------------------------------
-   SMART DJ
-   --------------------------------------------------
-  */
+  if (fx === "echo") {
 
-  function createLibraryItem(file) {
+    deck.delayWet.gain.value =
+      active
+        ? .45
+        : 0;
 
-    const info = parseFilename(file.name);
-
-    return {
-      id:
-        Date.now().toString(36) +
-        Math.random().toString(36).slice(2),
-
-      file,
-      name: file.name,
-      artist: info.artist,
-      title: info.title,
-      genre: info.genre,
-      bpm: null,
-      key: null,
-      energy: null,
-      analyzed: false
-    };
   }
 
 
-  function addFilesToLibrary(files) {
+  if (fx === "flanger") {
 
-    let added = 0;
+    deck.flangerWet.gain.value =
+      active
+        ? .35
+        : 0;
 
-    Array.from(files).forEach(file => {
+  }
 
-      if (!file.type.startsWith("audio/") &&
-          !file.type.startsWith("video/")) {
-        return;
-      }
 
-      const exists =
-        state.library.some(
-          item => item.name === file.name &&
-                  item.file.size === file.size
-        );
+  if (fx === "reverb") {
 
-      if (!exists) {
+    deck.reverbWet.gain.value =
+      active
+        ? .35
+        : 0;
 
-        state.library.push(
-          createLibraryItem(file)
-        );
+  }
 
-        added++;
-      }
-    });
+}
 
-    renderLibrary();
+
+/* =========================================================
+   VOICE ID
+========================================================= */
+
+$("voiceIdInput").addEventListener(
+  "change",
+  async event => {
+
+    const files =
+      [...event.target.files];
+
+    if (!files.length) return;
 
     setStatus(
-      added +
-      " tema(s) agregado(s) a la biblioteca"
+      "Cargando identificaciones..."
     );
-  }
 
 
-  async function analyzeTrack(item) {
+    for (const file of files) {
 
-    if (!item || !item.file) return item;
+      try {
 
-    try {
+        const arrayBuffer =
+          await file.arrayBuffer();
 
-      const buffer =
-        await item.file.arrayBuffer();
-
-      const decoded =
-        await audioCtx.decodeAudioData(buffer.slice(0));
-
-      const channel =
-        decoded.getChannelData(0);
-
-      item.energy =
-        calculateEnergy(channel);
-
-      item.bpm =
-        estimateBPM(channel, decoded.sampleRate);
-
-      item.key =
-        estimateKey(decoded);
-
-      item.analyzed = true;
-
-    } catch (error) {
-
-      console.warn(
-        "No se pudo analizar:",
-        item.name,
-        error
-      );
-
-      item.energy = item.energy ?? 50;
-      item.bpm = item.bpm ?? 120;
-      item.key = item.key ?? "--";
-      item.analyzed = true;
-    }
-
-    return item;
-  }
-
-
-  function calculateEnergy(data) {
-
-    const maxSamples =
-      Math.min(data.length, 500000);
-
-    const step =
-      Math.max(1, Math.floor(data.length / maxSamples));
-
-    let sum = 0;
-    let count = 0;
-
-    for (
-      let i = 0;
-      i < data.length;
-      i += step
-    ) {
-
-      const value = data[i];
-
-      sum += value * value;
-      count++;
-    }
-
-    const rms =
-      Math.sqrt(sum / Math.max(1, count));
-
-    return Math.max(
-      1,
-      Math.min(100, Math.round(rms * 220))
-    );
-  }
-
-
-  function estimateBPM(data, sampleRate) {
-
-    /*
-      Estimación rápida.
-      No pretende sustituir un análisis profesional.
-    */
-
-    const targetRate = 3000;
-
-    const ratio =
-      Math.max(
-        1,
-        Math.floor(sampleRate / targetRate)
-      );
-
-    const envelope = [];
-
-    let accumulator = 0;
-    let counter = 0;
-
-    for (
-      let i = 0;
-      i < data.length;
-      i += ratio
-    ) {
-
-      const value =
-        Math.abs(data[i]);
-
-      accumulator += value;
-      counter++;
-
-      if (counter >= 20) {
-
-        envelope.push(
-          accumulator / counter
-        );
-
-        accumulator = 0;
-        counter = 0;
-      }
-    }
-
-    if (envelope.length < 100) {
-      return 120;
-    }
-
-    const minBPM = 70;
-    const maxBPM = 180;
-
-    const sampleRateEnvelope =
-      sampleRate / ratio / 20;
-
-    let bestBPM = 120;
-    let bestScore = -Infinity;
-
-    for (
-      let bpm = minBPM;
-      bpm <= maxBPM;
-      bpm += 1
-    ) {
-
-      const period =
-        sampleRateEnvelope * 60 / bpm;
-
-      let score = 0;
-      let count = 0;
-
-      for (
-        let i = Math.floor(period);
-        i < envelope.length;
-        i += Math.max(1, Math.floor(period))
-      ) {
-
-        score += envelope[i];
-        count++;
-      }
-
-      score /= Math.max(1, count);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestBPM = bpm;
-      }
-    }
-
-    return bestBPM;
-  }
-
-
-  function estimateKey(buffer) {
-
-    /*
-      Estimación tonal simplificada.
-      Se presenta como KEY estimada.
-    */
-
-    const data =
-      buffer.getChannelData(0);
-
-    const sampleRate =
-      buffer.sampleRate;
-
-    const notes = [
-      "C",
-      "C#",
-      "D",
-      "D#",
-      "E",
-      "F",
-      "F#",
-      "G",
-      "G#",
-      "A",
-      "A#",
-      "B"
-    ];
-
-    const testFrequencies = [
-      261.63,
-      277.18,
-      293.66,
-      311.13,
-      329.63,
-      349.23,
-      369.99,
-      392,
-      415.30,
-      440,
-      466.16,
-      493.88
-    ];
-
-    let bestIndex = 0;
-    let bestPower = -Infinity;
-
-    const maxSamples =
-      Math.min(data.length, sampleRate * 8);
-
-    const step =
-      Math.max(
-        1,
-        Math.floor(data.length / maxSamples)
-      );
-
-    for (
-      let n = 0;
-      n < testFrequencies.length;
-      n++
-    ) {
-
-      const freq =
-        testFrequencies[n];
-
-      const period =
-        sampleRate / freq;
-
-      let power = 0;
-
-      for (
-        let i = 0;
-        i < data.length;
-        i += step * 30
-      ) {
-
-        const angle =
-          2 * Math.PI * i / period;
-
-        power +=
-          data[i] *
-          Math.sin(angle);
-      }
-
-      if (Math.abs(power) > bestPower) {
-
-        bestPower =
-          Math.abs(power);
-
-        bestIndex = n;
-      }
-    }
-
-    return notes[bestIndex];
-  }
-
-
-  function updateSmartCurrent(item) {
-
-    $("smartCurrentTrack").textContent =
-      item.artist + " — " + item.title;
-
-    $("smartCurrentBpm").textContent =
-      item.bpm ? item.bpm : "--";
-
-    $("smartCurrentKey").textContent =
-      item.key || "--";
-
-    $("smartCurrentEnergy").textContent =
-      item.energy ? item.energy : "--";
-  }
-
-
-  function compatibility(current, candidate) {
-
-    if (!current || !candidate) return 0;
-
-    let bpmScore = 60;
-
-    if (current.bpm && candidate.bpm) {
-
-      let a = candidate.bpm;
-      let b = current.bpm;
-
-      while (a < b * .75) a *= 2;
-      while (a > b * 1.5) a /= 2;
-
-      const diff =
-        Math.abs(a - b) / b;
-
-      bpmScore =
-        Math.max(
-          0,
-          100 - diff * 180
-        );
-    }
-
-    let keyScore = 60;
-
-    if (current.key && candidate.key) {
-
-      const notes = [
-        "C","C#","D","D#","E","F",
-        "F#","G","G#","A","A#","B"
-      ];
-
-      const a =
-        notes.indexOf(current.key);
-
-      const b =
-        notes.indexOf(candidate.key);
-
-      if (a >= 0 && b >= 0) {
-
-        const distance =
-          Math.min(
-            Math.abs(a - b),
-            12 - Math.abs(a - b)
+        const buffer =
+          await audioCtx.decodeAudioData(
+            arrayBuffer.slice(0)
           );
 
-        keyScore =
-          Math.max(
-            0,
-            100 - distance * 17
-          );
-      }
-    }
+        state.voiceIds.push({
 
-    let energyScore = 60;
+          name: file.name,
 
-    if (
-      Number.isFinite(current.energy) &&
-      Number.isFinite(candidate.energy)
-    ) {
+          buffer,
 
-      energyScore =
-        Math.max(
-          0,
-          100 -
-          Math.abs(
-            current.energy -
-            candidate.energy
-          ) * 2
-        );
-    }
+          duration:
+            buffer.duration
 
-    return Math.round(
-      bpmScore * .40 +
-      keyScore * .35 +
-      energyScore * .25
-    );
-  }
+        });
 
+      } catch (error) {
 
-  async function getCurrentLibraryItem() {
-
-    const deck = decks[state.active];
-
-    if (!deck || !deck.libraryId) {
-      return null;
-    }
-
-    return state.library.find(
-      item => item.id === deck.libraryId
-    ) || null;
-  }
-
-
-  async function findBestNext() {
-
-    if (!state.library.length) {
-
-      setStatus("La biblioteca está vacía.");
-      return;
-    }
-
-    await startAudioEngine();
-
-    let current =
-      await getCurrentLibraryItem();
-
-    if (!current) {
-
-      const activeDeck =
-        decks[state.active];
-
-      if (activeDeck && activeDeck.file) {
-
-        current = createLibraryItem(
-          activeDeck.file
+        console.error(
+          "Error ID:",
+          file.name,
+          error
         );
 
-        current.bpm = 120;
-        current.key = "C";
-        current.energy = 50;
       }
+
     }
 
-    if (!current) {
 
-      setStatus(
-        "Cargá primero un tema en un Deck."
-      );
-
-      return;
-    }
-
-    const candidates =
-      state.library.filter(
-        item =>
-          item.id !== current.id &&
-          !state.history.includes(item.id)
-      );
-
-    if (!candidates.length) {
-
-      state.history = [];
-
-      setStatus(
-        "Se reinició el historial para continuar."
-      );
-    }
-
-    const pool =
-      candidates.length
-        ? candidates
-        : state.library.filter(
-            item => item.id !== current.id
-          );
-
-    for (const item of pool) {
-
-      if (!item.analyzed) {
-        await analyzeTrack(item);
-      }
-    }
-
-    let mode =
-      $("smartMode").value;
-
-    let best = null;
-
-    let bestScore = -Infinity;
-
-    pool.forEach(item => {
-
-      let score =
-        compatibility(current, item);
-
-      if (mode === "build") {
-
-        score +=
-          ((item.energy || 50) -
-           (current.energy || 50)) * .5;
-      }
-
-      if (mode === "peak") {
-
-        score +=
-          (item.energy || 50) * .35;
-      }
-
-      if (mode === "chill") {
-
-        score +=
-          (100 -
-           (item.energy || 50)) * .35;
-      }
-
-      if (score > bestScore) {
-
-        bestScore = score;
-        best = item;
-      }
-    });
-
-    if (!best) return;
-
-    renderSmartResult(
-      [best],
-      current
-    );
-
-    return best;
-  }
-
-
-  function renderSmartResult(items, current) {
-
-    const container =
-      $("smartResults");
-
-    container.innerHTML = "";
-
-    items.forEach(item => {
-
-      const score =
-        compatibility(current, item);
-
-      const card =
-        document.createElement("div");
-
-      card.className = "smart-card";
-
-      card.innerHTML = `
-        <div>
-          <strong>${escapeHTML(item.artist)} — ${escapeHTML(item.title)}</strong>
-          <br>
-          <small>${escapeHTML(item.name)}</small>
-        </div>
-
-        <div>${item.bpm || "--"} BPM</div>
-        <div>${item.key || "--"}</div>
-        <div>ENERGY ${item.energy || "--"}</div>
-        <div class="score">${score}%</div>
-      `;
-
-      const button =
-        document.createElement("button");
-
-      button.textContent =
-        "PREPARAR B";
-
-      button.addEventListener(
-        "click",
-        () => prepareLibraryItem("B", item)
-      );
-
-      card.appendChild(button);
-
-      container.appendChild(card);
-    });
-  }
-
-
-  async function prepareLibraryItem(id, item) {
-
-    if (!item) return;
-
-    await loadFileToDeck(
-      id,
-      item.file,
-      item.id
-    );
-
-    if (decks[id] && item.bpm) {
-
-      const currentDeck =
-        decks[state.active];
-
-      if (
-        currentDeck &&
-        currentDeck.media &&
-        currentDeck.media.playbackRate
-      ) {
-
-        const sourceBPM =
-          item.bpm;
-
-        const targetBPM =
-          getDeckBPM(currentDeck) || sourceBPM;
-
-        const rate =
-          Math.max(
-            .92,
-            Math.min(
-              1.08,
-              targetBPM / sourceBPM
-            )
-          );
-
-        decks[id].media.playbackRate =
-          rate;
-      }
-    }
+    renderVoiceIds();
 
     setStatus(
-      "SIGUIENTE PREPARADO EN DECK " + id
+      state.voiceIds.length +
+      " identificaciones cargadas"
     );
+
+    event.target.value = "";
+
   }
+);
 
 
-  function getDeckBPM(deck) {
+/* =========================================================
+   RENDER VOICE IDS
+========================================================= */
 
-    if (!deck || !deck.libraryId) {
-      return null;
-    }
+function renderVoiceIds() {
 
-    const item =
-      state.library.find(
-        x => x.id === deck.libraryId
-      );
+  const list =
+    $("voiceIdList");
 
-    return item ? item.bpm : null;
-  }
+  const count =
+    state.voiceIds.length;
 
-
-  async function analyzeLibrary() {
-
-    await startAudioEngine();
-
-    if (!state.library.length) {
-
-      setStatus("No hay temas en la biblioteca.");
-      return;
-    }
-
-    setStatus("ANALIZANDO BIBLIOTECA...");
-
-    for (let i = 0; i < state.library.length; i++) {
-
-      const item =
-        state.library[i];
-
-      if (!item.analyzed) {
-
-        await analyzeTrack(item);
-
-        renderLibrary();
-      }
-    }
-
-    setStatus(
-      "ANÁLISIS DE BIBLIOTECA TERMINADO"
+  $("voiceIdCount").textContent =
+    count +
+    (
+      count === 1
+        ? " archivo"
+        : " archivos"
     );
+
+
+  if (!count) {
+
+    list.innerHTML =
+      `<div class="empty-library">
+        Cargá tus identificaciones MP3.
+      </div>`;
+
+    return;
+
   }
 
 
-  async function generateSmartPlaylist() {
-
-    await startAudioEngine();
-
-    if (!state.library.length) {
-
-      setStatus("Agregá música primero.");
-      return;
-    }
-
-    await analyzeLibrary();
-
-    state.smartQueue = [];
-
-    let current =
-      await getCurrentLibraryItem();
-
-    if (!current) {
-
-      current =
-        state.library[0];
-    }
-
-    const available =
-      state.library.filter(
-        item => item.id !== current.id
-      );
-
-    while (
-      state.smartQueue.length <
-        Math.min(10, available.length)
-    ) {
-
-      let best = null;
-      let bestScore = -Infinity;
-
-      available.forEach(item => {
-
-        if (
-          state.smartQueue.some(
-            x => x.id === item.id
-          )
-        ) {
-          return;
-        }
-
-        const score =
-          compatibility(
-            current,
-            item
-          );
-
-        if (score > bestScore) {
-
-          bestScore = score;
-          best = item;
-        }
-      });
-
-      if (!best) break;
-
-      state.smartQueue.push(best);
-      current = best;
-    }
-
-    renderQueue();
-
-    setStatus(
-      "SMART PLAYLIST GENERADA"
-    );
-  }
+  list.innerHTML = "";
 
 
-  function renderQueue() {
-
-    const container =
-      $("smartQueue");
-
-    container.innerHTML = "";
-
-    state.smartQueue.forEach(
-      (item, index) => {
-
-        const div =
-          document.createElement("div");
-
-        div.className = "library-row";
-
-        div.innerHTML = `
-          <span>${index + 1}</span>
-          <span class="title">
-            ${escapeHTML(item.artist)} — ${escapeHTML(item.title)}
-          </span>
-          <span>${item.bpm || "--"}</span>
-          <span>${item.key || "--"}</span>
-          <span>${item.energy || "--"}</span>
-          <span>
-            <button data-queue-id="${item.id}">
-              CARGAR B
-            </button>
-          </span>
-        `;
-
-        div.querySelector("button")
-          .addEventListener(
-            "click",
-            () => prepareLibraryItem("B", item)
-          );
-
-        container.appendChild(div);
-      }
-    );
-  }
-
-
-  /*
-   --------------------------------------------------
-   LIBRARY UI
-   --------------------------------------------------
-  */
-
-  function renderLibrary() {
-
-    const body =
-      $("libraryBody");
-
-    const search =
-      $("librarySearch").value
-        .toLowerCase()
-        .trim();
-
-    body.innerHTML = "";
-
-    const visible =
-      state.library.filter(item => {
-
-        const text =
-          (
-            item.name +
-            " " +
-            item.artist +
-            " " +
-            item.title
-          ).toLowerCase();
-
-        return text.includes(search);
-      });
-
-    visible.forEach((item, index) => {
+  state.voiceIds.forEach(
+    (id,index) => {
 
       const row =
-        document.createElement("div");
-
-      row.className = "library-row";
-
-      row.innerHTML = `
-        <span>${index + 1}</span>
-
-        <span class="title">
-          ${escapeHTML(item.artist)} — ${escapeHTML(item.title)}
-        </span>
-
-        <span>${item.bpm || "--"}</span>
-
-        <span>${item.key || "--"}</span>
-
-        <span>${item.energy || "--"}</span>
-
-        <span>
-          <button class="load-a">A</button>
-          <button class="load-b">B</button>
-        </span>
-      `;
-
-      row.querySelector(".load-a")
-        .addEventListener(
-          "click",
-          () => prepareLibraryItem("A", item)
+        document.createElement(
+          "div"
         );
 
-      row.querySelector(".load-b")
-        .addEventListener(
-          "click",
-          () => prepareLibraryItem("B", item)
+      row.className =
+        "voice-id-item";
+
+
+      const name =
+        document.createElement(
+          "strong"
         );
 
-      body.appendChild(row);
-    });
-
-    $("libraryCount").textContent =
-      state.library.length + " TEMAS";
-  }
+      name.textContent =
+        id.name;
 
 
-  /*
-   --------------------------------------------------
-   AUTO DJ
-   --------------------------------------------------
-  */
-
-  async function prepareNextTrack() {
-
-    const best =
-      await findBestNext();
-
-    if (!best) return;
-
-    const inactive =
-      state.active === "A"
-        ? "B"
-        : "A";
-
-    await prepareLibraryItem(
-      inactive,
-      best
-    );
-
-    return best;
-  }
-
-
-  async function startAutoDJ() {
-
-    if (state.autoDJ) {
-
-      state.autoDJ = false;
-
-      $("autoDJ").textContent =
-        "AUTO DJ: OFF";
-
-      $("autoDJ").classList.remove("active");
-
-      setStatus("AUTO DJ DESACTIVADO");
-
-      return;
-    }
-
-    await startAudioEngine();
-
-    if (!decks.A.media.src &&
-        !decks.B.media.src) {
-
-      setStatus(
-        "Cargá al menos un tema antes de activar AUTO DJ."
-      );
-
-      return;
-    }
-
-    state.autoDJ = true;
-
-    $("autoDJ").textContent =
-      "AUTO DJ: ON";
-
-    $("autoDJ").classList.add("active");
-
-    setStatus("AUTO DJ ACTIVADO");
-
-    const activeDeck =
-      decks[state.active];
-
-    if (
-      activeDeck &&
-      activeDeck.media.paused
-    ) {
-      await playDeck(state.active);
-    }
-
-    await prepareNextTrack();
-  }
-
-
-  async function checkAutoDJ(id) {
-
-    if (!state.autoDJ) return;
-
-    if (state.autoTransitionRunning) return;
-
-    const deck =
-      decks[id];
-
-    if (!deck ||
-        deck.media.paused ||
-        !Number.isFinite(deck.media.duration)) {
-      return;
-    }
-
-    const remaining =
-      deck.media.duration -
-      deck.media.currentTime;
-
-    if (remaining <= 12) {
-
-      await startAutoTransition(id);
-    }
-  }
-
-
-  async function startAutoTransition(fromId) {
-
-    if (!state.autoDJ) return;
-
-    if (state.autoTransitionRunning) return;
-
-    state.autoTransitionRunning = true;
-
-    const toId =
-      fromId === "A" ? "B" : "A";
-
-    const from =
-      decks[fromId];
-
-    const to =
-      decks[toId];
-
-    if (!to || !to.media.src) {
-
-      await prepareNextTrack();
-    }
-
-    if (!to.media.src) {
-
-      state.autoTransitionRunning = false;
-      return;
-    }
-
-    try {
-
-      await to.media.play();
-
-    } catch (error) {
-
-      console.warn(error);
-      state.autoTransitionRunning = false;
-      return;
-    }
-
-    const start =
-      parseFloat($("crossfader").value);
-
-    const target =
-      toId === "B" ? 1 : 0;
-
-    const duration = 10000;
-    const startTime = performance.now();
-
-    function animate(now) {
-
-      const elapsed =
-        now - startTime;
-
-      const progress =
-        Math.min(
-          1,
-          elapsed / duration
+      const play =
+        document.createElement(
+          "button"
         );
 
-      const eased =
-        progress < .5
-          ? 2 * progress * progress
-          : 1 -
-            Math.pow(
-              -2 * progress + 2,
-              2
-            ) / 2;
+      play.textContent =
+        "▶";
 
-      const value =
-        start +
-        (target - start) * eased;
+      play.title =
+        "Reproducir";
 
-      $("crossfader").value = value;
+      play.addEventListener(
+        "click",
+        () => playVoiceId(index)
+      );
 
-      updateCrossfader(value);
 
-      if (progress < 1) {
-
-        requestAnimationFrame(animate);
-
-      } else {
-
-        from.media.pause();
-
-        state.active = toId;
-
-        updateActiveLabel();
-        updateNowPlaying(toId);
-        updateVideo(toId);
-
-        state.history.push(
-          from.libraryId
+      const remove =
+        document.createElement(
+          "button"
         );
 
-        if (state.history.length > 30) {
-          state.history.shift();
-        }
-
-        state.autoTransitionRunning = false;
-
-        prepareNextTrack();
-      }
-    }
-
-    requestAnimationFrame(animate);
-  }
-
-
-  /*
-   --------------------------------------------------
-   MICROPHONE
-   --------------------------------------------------
-  */
-
-  async function toggleMicrophone() {
-
-    await startAudioEngine();
-
-    if (state.micStream) {
-
-      state.micStream
-        .getTracks()
-        .forEach(track => track.stop());
-
-      state.micStream = null;
-
-      if (state.micSource) {
-        state.micSource.disconnect();
-        state.micSource = null;
-      }
-
-      $("micToggle").textContent =
-        "MIC: OFF";
-
-      setStatus("MICRÓFONO DESACTIVADO");
-
-      return;
-    }
-
-    try {
-
-      const stream =
-        await navigator.mediaDevices
-          .getUserMedia({
-            audio: true
-          });
-
-      state.micStream = stream;
-
-      state.micSource =
-        audioCtx.createMediaStreamSource(
-          stream
-        );
-
-      state.micGainNode =
-        audioCtx.createGain();
-
-      state.micGainNode.gain.value =
-        parseFloat(
-          $("micGain").value
-        );
-
-      state.micSource.connect(
-        state.micGainNode
-      );
-
-      state.micGainNode.connect(
-        masterGain
-      );
-
-      $("micToggle").textContent =
-        "MIC: ON";
-
-      setStatus("MICRÓFONO ACTIVADO");
-
-    } catch (error) {
-
-      console.error(error);
-
-      setStatus(
-        "No se pudo acceder al micrófono."
-      );
-    }
-  }
-
-
-  /*
-   --------------------------------------------------
-   RECORDING
-   --------------------------------------------------
-  */
-
-  function startRecording() {
-
-    if (!recordDestination) {
-
-      setStatus(
-        "Iniciá primero el sistema de audio."
-      );
-
-      return;
-    }
-
-    if (
-      !window.MediaRecorder
-    ) {
-
-      setStatus(
-        "Este navegador no permite grabación WebM."
-      );
-
-      return;
-    }
-
-    state.recordingChunks = [];
-
-    const mimeTypes = [
-      "audio/webm;codecs=opus",
-      "audio/webm"
-    ];
-
-    let mime = "";
-
-    for (const type of mimeTypes) {
-
-      if (
-        MediaRecorder.isTypeSupported(type)
-      ) {
-        mime = type;
-        break;
-      }
-    }
-
-    try {
-
-      state.recorder =
-        new MediaRecorder(
-          recordDestination.stream,
-          mime ? { mimeType: mime } : undefined
-        );
-
-      state.recorder.ondataavailable =
-        event => {
-
-          if (event.data.size > 0) {
-            state.recordingChunks.push(
-              event.data
-            );
-          }
-        };
-
-      state.recorder.onstop =
-        saveRecording;
-
-      state.recorder.start();
-
-      setStatus("GRABANDO MIX...");
-
-    } catch (error) {
-
-      console.error(error);
-
-      setStatus(
-        "No se pudo iniciar la grabación."
-      );
-    }
-  }
-
-
-  function stopRecording() {
-
-    if (
-      state.recorder &&
-      state.recorder.state !== "inactive"
-    ) {
-
-      state.recorder.stop();
-
-      setStatus(
-        "PROCESANDO GRABACIÓN..."
-      );
-    }
-  }
-
-
-  function saveRecording() {
-
-    const blob =
-      new Blob(
-        state.recordingChunks,
-        {
-          type: "audio/webm"
-        }
-      );
-
-    const url =
-      URL.createObjectURL(blob);
-
-    const a =
-      document.createElement("a");
-
-    a.href = url;
-    a.download =
-      "DJ-HUMBERTO-HC-PRO-MIX-" +
-      Date.now() +
-      ".webm";
-
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    setTimeout(
-      () => URL.revokeObjectURL(url),
-      2000
-    );
-
-    setStatus(
-      "GRABACIÓN GUARDADA"
-    );
-  }
-
-
-  /*
-   --------------------------------------------------
-   VISUALIZER
-   --------------------------------------------------
-  */
-
-  function drawVisualizer() {
-
-    const canvas =
-      $("visualizer");
-
-    const ctx =
-      canvas.getContext("2d");
-
-    const analyser =
-      masterAnalyser;
-
-    function resize() {
-
-      const rect =
-        canvas.getBoundingClientRect();
-
-      canvas.width =
-        Math.max(
-          300,
-          Math.floor(rect.width)
-        );
-
-      canvas.height =
-        Math.max(
-          80,
-          Math.floor(rect.height)
-        );
-    }
-
-    resize();
-
-    window.addEventListener(
-      "resize",
-      resize
-    );
-
-    function render() {
-
-      requestAnimationFrame(render);
-
-      if (!analyser) return;
-
-      const bufferLength =
-        analyser.frequencyBinCount;
-
-      const data =
-        new Uint8Array(bufferLength);
-
-      analyser.getByteFrequencyData(data);
-
-      ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      );
-
-      const bars = 80;
-
-      const step =
-        Math.floor(
-          bufferLength / bars
-        );
-
-      const barWidth =
-        canvas.width / bars;
-
-      for (let i = 0; i < bars; i++) {
-
-        const value =
-          data[i * step] || 0;
-
-        const height =
-          (value / 255) *
-          canvas.height;
-
-        const x =
-          i * barWidth;
-
-        const y =
-          canvas.height - height;
-
-        const gradient =
-          ctx.createLinearGradient(
-            0,
-            canvas.height,
-            0,
-            0
+      remove.textContent =
+        "×";
+
+      remove.title =
+        "Eliminar";
+
+      remove.addEventListener(
+        "click",
+        () => {
+
+          state.voiceIds.splice(
+            index,
+            1
           );
 
-        gradient.addColorStop(
-          0,
-          "#00eaff"
-        );
+          renderVoiceIds();
 
-        gradient.addColorStop(
-          .5,
-          "#a855f7"
-        );
+        }
+      );
 
-        gradient.addColorStop(
-          1,
-          "#ff6b00"
-        );
 
-        ctx.fillStyle =
-          gradient;
+      row.appendChild(name);
 
-        ctx.fillRect(
-          x,
-          y,
-          Math.max(1, barWidth - 2),
-          height
-        );
-      }
+      row.appendChild(play);
 
-      updateMeters();
+      row.appendChild(remove);
+
+      list.appendChild(row);
+
     }
+  );
 
-    render();
+}
+
+
+/* =========================================================
+   PLAY VOICE ID
+========================================================= */
+
+let activeVoiceSource = null;
+
+
+function playVoiceId(index) {
+
+  if (!audioCtx) return;
+
+  const item =
+    state.voiceIds[index];
+
+  if (!item) return;
+
+
+  if (activeVoiceSource) {
+
+    try {
+      activeVoiceSource.stop();
+    } catch {}
+
+    activeVoiceSource = null;
+
   }
 
 
-  function updateMeters() {
+  const source =
+    audioCtx.createBufferSource();
 
-    ["A", "B"].forEach(id => {
+  source.buffer =
+    item.buffer;
 
-      const deck =
-        decks[id];
 
-      if (!deck) return;
+  const gain =
+    audioCtx.createGain();
 
-      const data =
-        new Uint8Array(
-          deck.analyser.frequencyBinCount
-        );
+  gain.gain.value =
+    parseFloat(
+      $("voiceIdVolume").value
+    );
 
-      deck.analyser.getByteFrequencyData(
-        data
-      );
 
-      let sum = 0;
+  source.connect(gain);
 
-      for (let i = 0; i < data.length; i++) {
-        sum += data[i];
-      }
+  gain.connect(voiceGain);
 
-      const avg =
-        sum / Math.max(1, data.length);
 
-      const level =
-        Math.min(
-          100,
-          avg / 2.55
-        );
+  const duck =
+    $("voiceDucking").checked;
 
-      $("meter" + id).style.height =
-        level + "%";
-    });
+
+  if (duck) {
+    duckMusic(true);
   }
 
 
-  /*
-   --------------------------------------------------
-   EVENTOS
-   --------------------------------------------------
-  */
+  source.onended =
+    () => {
 
-  $("startAudioBtn").addEventListener(
-    "click",
-    async () => {
+      if (duck) {
+        duckMusic(false);
+      }
 
-      await startAudioEngine();
-
-      state.started = true;
-
-      $("bootOverlay")
-        .classList.add("hidden");
-
-      $("app")
-        .classList.remove("hidden");
-
-      drawVisualizer();
+      activeVoiceSource = null;
 
       setStatus(
-        "HC PRO DJ HUMBERTO 3.1 LISTO"
+        "ID finalizada — DJ HUMBERTO"
       );
-    }
+
+    };
+
+
+  activeVoiceSource =
+    source;
+
+
+  state.currentVoice =
+    index;
+
+
+  state.voiceHistory.push(
+    index
   );
 
 
-  $("aLoad").addEventListener(
-    "click",
-    () => $("mediaA").click()
-  );
-
-  $("bLoad").addEventListener(
-    "click",
-    () => $("mediaB").click()
-  );
+  if (
+    state.voiceHistory.length >
+    20
+  ) {
+    state.voiceHistory.shift();
+  }
 
 
-  $("mediaA").addEventListener(
-    "change",
-    event => {
+  $("currentIdName").textContent =
+    item.name;
 
-      const file =
-        event.target.files[0];
 
-      if (file) {
-        loadFileToDeck("A", file);
-      }
-    }
+  setStatus(
+    "EN VIVO DJ HUMBERTO — " +
+    item.name
   );
 
 
-  $("mediaB").addEventListener(
-    "change",
-    event => {
+  source.start(0);
 
-      const file =
-        event.target.files[0];
-
-      if (file) {
-        loadFileToDeck("B", file);
-      }
-    }
-  );
+}
 
 
-  $("aPlay").addEventListener(
-    "click",
-    () => playDeck("A")
-  );
+/* =========================================================
+   RANDOM ID
+========================================================= */
 
-  $("bPlay").addEventListener(
-    "click",
-    () => playDeck("B")
-  );
+function playRandomVoiceId() {
 
-  $("aPause").addEventListener(
-    "click",
-    () => pauseDeck("A")
-  );
+  const count =
+    state.voiceIds.length;
 
-  $("bPause").addEventListener(
-    "click",
-    () => pauseDeck("B")
-  );
+  if (!count) {
 
-  $("aStop").addEventListener(
-    "click",
-    () => stopDeck("A")
-  );
+    setStatus(
+      "Primero cargá identificaciones DJ HUMBERTO"
+    );
 
-  $("bStop").addEventListener(
-    "click",
-    () => stopDeck("B")
-  );
+    return;
+
+  }
 
 
-  $("aProgress").addEventListener(
-    "input",
-    event => {
-
-      const deck =
-        decks.A;
-
-      if (!deck) return;
-
-      if (Number.isFinite(deck.media.duration)) {
-
-        deck.media.currentTime =
-          deck.media.duration *
-          (parseFloat(event.target.value) / 100);
-      }
-    }
-  );
+  let choices =
+    state.voiceIds.map(
+      (_,index) => index
+    );
 
 
-  $("bProgress").addEventListener(
-    "input",
-    event => {
-
-      const deck =
-        decks.B;
-
-      if (!deck) return;
-
-      if (Number.isFinite(deck.media.duration)) {
-
-        deck.media.currentTime =
-          deck.media.duration *
-          (parseFloat(event.target.value) / 100);
-      }
-    }
-  );
+  choices =
+    choices.filter(
+      index =>
+        index !==
+        state.currentVoice
+    );
 
 
-  setupDeckControls("A");
-  setupDeckControls("B");
+  const recent =
+    state.voiceHistory.slice(-3);
 
 
-  $("masterVolume").addEventListener(
-    "input",
-    event => {
-
-      if (masterGain) {
-        masterGain.gain.value =
-          parseFloat(event.target.value);
-      }
-    }
-  );
+  choices =
+    choices.filter(
+      index =>
+        !recent.includes(index)
+    );
 
 
-  $("crossfader").addEventListener(
-    "input",
-    event => {
+  if (!choices.length) {
 
-      updateCrossfader(
-        parseFloat(event.target.value)
+    choices =
+      state.voiceIds.map(
+        (_,index) => index
       );
-    }
+
+  }
+
+
+  const randomIndex =
+    choices[
+      Math.floor(
+        Math.random() *
+        choices.length
+      )
+    ];
+
+
+  playVoiceId(
+    randomIndex
   );
 
+}
 
-  $("transitionMode").addEventListener(
-    "change",
-    event => {
 
-      state.transition =
-        event.target.value;
+/* =========================================================
+   NEXT ID
+========================================================= */
 
-      setStatus(
-        "TRANSICIÓN: " +
-        event.target.value.toUpperCase()
+function playNextVoiceId() {
+
+  if (!state.voiceIds.length) {
+
+    setStatus(
+      "No hay identificaciones cargadas"
+    );
+
+    return;
+
+  }
+
+
+  let next =
+    state.currentVoice + 1;
+
+
+  if (
+    next >=
+    state.voiceIds.length
+  ) {
+    next = 0;
+  }
+
+
+  playVoiceId(next);
+
+}
+
+
+$("playRandomId").addEventListener(
+  "click",
+  playRandomVoiceId
+);
+
+
+$("playNextId").addEventListener(
+  "click",
+  playNextVoiceId
+);
+
+
+/* =========================================================
+   ID VOLUME
+========================================================= */
+
+$("voiceIdVolume").addEventListener(
+  "input",
+  event => {
+
+    const value =
+      parseFloat(
+        event.target.value
       );
+
+    $("voiceIdVolumeValue").textContent =
+      Math.round(value * 100) +
+      "%";
+
+  }
+);
+
+
+/* =========================================================
+   DUCKING
+========================================================= */
+
+function duckMusic(active) {
+
+  if (!musicBus || !audioCtx) {
+    return;
+  }
+
+
+  musicBus.gain.cancelScheduledValues(
+    audioCtx.currentTime
+  );
+
+
+  musicBus.gain.setTargetAtTime(
+    active ? .28 : 1,
+    audioCtx.currentTime,
+    .05
+  );
+
+}
+
+
+/* =========================================================
+   AUTO ID
+========================================================= */
+
+$("autoIdToggle").addEventListener(
+  "click",
+  () => {
+
+    state.autoId =
+      !state.autoId;
+
+
+    updateAutoIdUI();
+
+
+    if (state.autoId) {
+
+      startAutoIdTimer();
+
+    } else {
+
+      stopAutoIdTimer();
+
     }
-  );
+
+  }
+);
 
 
-  $("prepareNext").addEventListener(
-    "click",
-    prepareNextTrack
-  );
+document.querySelectorAll(
+  "[data-id-interval]"
+).forEach(
+  button => {
+
+    button.addEventListener(
+      "click",
+      () => {
+
+        state.idInterval =
+          parseInt(
+            button.dataset.idInterval
+          );
+
+        document
+          .querySelectorAll(
+            "[data-id-interval]"
+          )
+          .forEach(
+            b =>
+              b.classList.remove(
+                "active"
+              )
+          );
+
+        button.classList.add(
+          "active"
+        );
 
 
-  $("autoDJ").addEventListener(
-    "click",
-    startAutoDJ
-  );
+        if (state.autoId) {
+          startAutoIdTimer();
+        }
 
-
-  $("micToggle").addEventListener(
-    "click",
-    toggleMicrophone
-  );
-
-
-  $("micGain").addEventListener(
-    "input",
-    event => {
-
-      if (state.micGainNode) {
-
-        state.micGainNode.gain.value =
-          parseFloat(event.target.value);
       }
+    );
+
+  }
+);
+
+
+function updateAutoIdUI() {
+
+  const button =
+    $("autoIdToggle");
+
+  if (state.autoId) {
+
+    button.textContent =
+      "AUTO ID: ON";
+
+    button.classList.add(
+      "active"
+    );
+
+  } else {
+
+    button.textContent =
+      "AUTO ID: OFF";
+
+    button.classList.remove(
+      "active"
+    );
+
+    $("nextIdStatus").textContent =
+      "AUTO ID DESACTIVADO";
+
+  }
+
+}
+
+
+function startAutoIdTimer() {
+
+  stopAutoIdTimer();
+
+
+  const milliseconds =
+    state.idInterval *
+    60 *
+    1000;
+
+
+  state.idNextTime =
+    Date.now() +
+    milliseconds;
+
+
+  state.idTimer =
+    setInterval(
+      () => {
+
+        if (
+          Date.now() >=
+          state.idNextTime
+        ) {
+
+          if (
+            state.voiceIds.length
+          ) {
+
+            playRandomVoiceId();
+
+          }
+
+          state.idNextTime =
+            Date.now() +
+            milliseconds;
+
+        }
+
+
+        updateNextIdStatus();
+
+      },
+      1000
+    );
+
+}
+
+
+function stopAutoIdTimer() {
+
+  if (state.idTimer) {
+
+    clearInterval(
+      state.idTimer
+    );
+
+    state.idTimer = null;
+
+  }
+
+}
+
+
+function updateNextIdStatus() {
+
+  if (
+    !state.autoId ||
+    !state.idNextTime
+  ) {
+
+    $("nextIdStatus").textContent =
+      "AUTO ID DESACTIVADO";
+
+    return;
+
+  }
+
+
+  const remaining =
+    Math.max(
+      0,
+      state.idNextTime -
+      Date.now()
+    );
+
+
+  const minutes =
+    Math.floor(
+      remaining / 60000
+    );
+
+  const seconds =
+    Math.floor(
+      (remaining % 60000) / 1000
+    );
+
+
+  $("nextIdStatus").textContent =
+    "EN " +
+    minutes +
+    ":" +
+    String(seconds).padStart(2,"0");
+
+}
+
+
+/* =========================================================
+   JINGLE BANK
+========================================================= */
+
+$("jingleInput").addEventListener(
+  "change",
+  async event => {
+
+    const files =
+      [...event.target.files];
+
+    if (!files.length) return;
+
+
+    for (
+      let i = 0;
+      i < files.length;
+      i++
+    ) {
+
+      if (
+        state.jingleBank.length >= 8
+      ) {
+        break;
+      }
+
+
+      try {
+
+        const buffer =
+          await audioCtx.decodeAudioData(
+            (
+              await files[i].arrayBuffer()
+            ).slice(0)
+          );
+
+        state.jingleBank.push({
+          name: files[i].name,
+          buffer
+        });
+
+      } catch (error) {
+
+        console.error(error);
+
+      }
+
     }
-  );
 
 
-  $("recordStart").addEventListener(
-    "click",
-    startRecording
-  );
+    renderJingleBank();
+
+    event.target.value = "";
+
+  }
+);
 
 
-  $("recordStop").addEventListener(
-    "click",
-    stopRecording
-  );
-
+function renderJingleBank() {
 
   document
-    .querySelectorAll("[data-fx]")
-    .forEach(button => {
+    .querySelectorAll(".jingle")
+    .forEach(
+      (button,index) => {
+
+        button.classList.toggle(
+          "loaded",
+          !!state.jingleBank[index]
+        );
+
+        if (
+          state.jingleBank[index]
+        ) {
+
+          button.title =
+            state.jingleBank[index].name;
+
+        }
+
+      }
+    );
+
+}
+
+
+document
+  .querySelectorAll(".jingle")
+  .forEach(
+    button => {
 
       button.addEventListener(
         "click",
         () => {
 
-          toggleFX(
-            button.dataset.deck,
-            button.dataset.fx
-          );
+          const slot =
+            parseInt(
+              button.dataset.slot
+            ) - 1;
+
+          playJingle(slot);
+
         }
       );
-    });
 
-
-  $("libraryInput").addEventListener(
-    "change",
-    event => {
-
-      addFilesToLibrary(
-        event.target.files
-      );
-
-      event.target.value = "";
     }
   );
 
 
-  $("folderInput").addEventListener(
-    "change",
-    event => {
+function playJingle(slot) {
 
-      addFilesToLibrary(
-        event.target.files
+  const item =
+    state.jingleBank[slot];
+
+  if (!item) {
+
+    setStatus(
+      "Ese Jingle todavía no está cargado"
+    );
+
+    return;
+
+  }
+
+
+  const source =
+    audioCtx.createBufferSource();
+
+  source.buffer =
+    item.buffer;
+
+
+  source.connect(
+    jingleGain
+  );
+
+
+  source.start(0);
+
+
+  setStatus(
+    "JINGLE — DJ HUMBERTO"
+  );
+
+}
+
+
+/* =========================================================
+   DECK INPUTS
+========================================================= */
+
+$("aLoad").addEventListener(
+  "change",
+  event => {
+
+    const file =
+      event.target.files[0];
+
+    if (file) {
+      loadFileToDeck(
+        "A",
+        file
+      );
+    }
+
+  }
+);
+
+
+$("bLoad").addEventListener(
+  "change",
+  event => {
+
+    const file =
+      event.target.files[0];
+
+    if (file) {
+      loadFileToDeck(
+        "B",
+        file
+      );
+    }
+
+  }
+);
+
+
+$("aPlay").addEventListener(
+  "click",
+  () =>
+    playDeck("A")
+);
+
+
+$("aPause").addEventListener(
+  "click",
+  () =>
+    pauseDeck("A")
+);
+
+
+$("aStop").addEventListener(
+  "click",
+  () =>
+    stopDeck("A")
+);
+
+
+$("bPlay").addEventListener(
+  "click",
+  () =>
+    playDeck("B")
+);
+
+
+$("bPause").addEventListener(
+  "click",
+  () =>
+    pauseDeck("B")
+);
+
+
+$("bStop").addEventListener(
+  "click",
+  () =>
+    stopDeck("B")
+);
+
+
+/* =========================================================
+   PROGRESS
+========================================================= */
+
+$("aProgress").addEventListener(
+  "input",
+  event => {
+
+    const media =
+      decks.A.media;
+
+    if (media.duration) {
+
+      media.currentTime =
+        (
+          event.target.value /
+          100
+        ) *
+        media.duration;
+
+    }
+
+  }
+);
+
+
+$("bProgress").addEventListener(
+  "input",
+  event => {
+
+    const media =
+      decks.B.media;
+
+    if (media.duration) {
+
+      media.currentTime =
+        (
+          event.target.value /
+          100
+        ) *
+        media.duration;
+
+    }
+
+  }
+);
+
+
+/* =========================================================
+   GAIN
+========================================================= */
+
+$("aGain").addEventListener(
+  "input",
+  updateCrossfader
+);
+
+
+$("bGain").addEventListener(
+  "input",
+  updateCrossfader
+);
+
+
+$("crossfader").addEventListener(
+  "input",
+  updateCrossfader
+);
+
+
+/* =========================================================
+   PITCH
+========================================================= */
+
+$("aPitch").addEventListener(
+  "input",
+  event => {
+
+    const value =
+      parseFloat(
+        event.target.value
       );
 
-      event.target.value = "";
+    decks.A.media.playbackRate =
+      value;
+
+    $("aPitchValue").textContent =
+      value.toFixed(2) +
+      "x";
+
+  }
+);
+
+
+$("bPitch").addEventListener(
+  "input",
+  event => {
+
+    const value =
+      parseFloat(
+        event.target.value
+      );
+
+    decks.B.media.playbackRate =
+      value;
+
+    $("bPitchValue").textContent =
+      value.toFixed(2) +
+      "x";
+
+  }
+);
+
+
+/* =========================================================
+   EQ
+========================================================= */
+
+function connectEQControl(
+  deckId,
+  elementId,
+  node
+) {
+
+  $(elementId).addEventListener(
+    "input",
+    event => {
+
+      node.gain.value =
+        parseFloat(
+          event.target.value
+        );
+
+    }
+  );
+
+}
+
+
+connectEQControl(
+  "A",
+  "aLow",
+  {
+    set gain(v) {
+      if (decks.A) {
+        decks.A.low.gain.value = v;
+      }
+    }
+  }
+);
+
+
+/*
+   Direct controls
+*/
+
+$("aLow").addEventListener(
+  "input",
+  e =>
+    decks.A.low.gain.value =
+      parseFloat(e.target.value)
+);
+
+$("aMid").addEventListener(
+  "input",
+  e =>
+    decks.A.mid.gain.value =
+      parseFloat(e.target.value)
+);
+
+$("aHigh").addEventListener(
+  "input",
+  e =>
+    decks.A.high.gain.value =
+      parseFloat(e.target.value)
+);
+
+$("bLow").addEventListener(
+  "input",
+  e =>
+    decks.B.low.gain.value =
+      parseFloat(e.target.value)
+);
+
+$("bMid").addEventListener(
+  "input",
+  e =>
+    decks.B.mid.gain.value =
+      parseFloat(e.target.value)
+);
+
+$("bHigh").addEventListener(
+  "input",
+  e =>
+    decks.B.high.gain.value =
+      parseFloat(e.target.value)
+);
+
+
+/* =========================================================
+   MASTER
+========================================================= */
+
+$("masterVolume").addEventListener(
+  "input",
+  event => {
+
+    const value =
+      parseFloat(
+        event.target.value
+      );
+
+    masterGain.gain.value =
+      value;
+
+    $("masterValue").textContent =
+      Math.round(value * 100) +
+      "%";
+
+  }
+);
+
+
+/* =========================================================
+   TRANSITION
+========================================================= */
+
+$("transitionMode").addEventListener(
+  "change",
+  event => {
+
+    state.transition =
+      event.target.value;
+
+    updateCrossfader();
+
+  }
+);
+
+
+/* =========================================================
+   AUTO DJ
+========================================================= */
+
+$("autoDJ").addEventListener(
+  "click",
+  () => {
+
+    state.autoDJ =
+      !state.autoDJ;
+
+
+    const button =
+      $("autoDJ");
+
+
+    button.textContent =
+      state.autoDJ
+        ? "ON"
+        : "OFF";
+
+
+    button.classList.toggle(
+      "active",
+      state.autoDJ
+    );
+
+
+    if (state.autoDJ) {
+
+      setStatus(
+        "AUTO DJ ACTIVADO"
+      );
+
+      prepareNextTrack();
+
+    } else {
+
+      setStatus(
+        "AUTO DJ DESACTIVADO"
+      );
+
+    }
+
+  }
+);
+
+
+$("prepareNext").addEventListener(
+  "click",
+  prepareNextTrack
+);
+
+
+async function prepareNextTrack() {
+
+  const inactive =
+    state.activeDeck === "A"
+      ? "B"
+      : "A";
+
+
+  const suggestion =
+    findBestNextTrack();
+
+
+  if (
+    suggestion
+  ) {
+
+    await loadFileToDeck(
+      inactive,
+      suggestion.file
+    );
+
+    setStatus(
+      "SIGUIENTE PREPARADO EN DECK " +
+      inactive
+    );
+
+  } else {
+
+    setStatus(
+      "No hay siguiente canción disponible"
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   DECK ENDED
+========================================================= */
+
+async function onDeckEnded(id) {
+
+  if (!state.autoDJ) {
+
+    updateNowPlaying();
+
+    return;
+
+  }
+
+
+  if (
+    state.autoTransitionRunning
+  ) {
+    return;
+  }
+
+
+  state.autoTransitionRunning =
+    true;
+
+
+  const next =
+    id === "A"
+      ? "B"
+      : "A";
+
+
+  if (
+    !decks[next].media.src
+  ) {
+
+    const suggestion =
+      findBestNextTrack();
+
+    if (suggestion) {
+
+      await loadFileToDeck(
+        next,
+        suggestion.file
+      );
+
+    }
+
+  }
+
+
+  await playDeck(next);
+
+
+  state.activeDeck =
+    next;
+
+
+  const target =
+    next === "A"
+      ? 0
+      : 1;
+
+
+  $("crossfader").value =
+    target;
+
+
+  updateCrossfader();
+
+
+  state.autoTransitionRunning =
+    false;
+
+}
+
+
+/* =========================================================
+   LIBRARY
+========================================================= */
+
+$("libraryInput").addEventListener(
+  "change",
+  event => {
+
+    addLibraryFiles(
+      [...event.target.files]
+    );
+
+    event.target.value = "";
+
+  }
+);
+
+
+$("folderInput").addEventListener(
+  "change",
+  event => {
+
+    addLibraryFiles(
+      [...event.target.files]
+    );
+
+    event.target.value = "";
+
+  }
+);
+
+
+function addLibraryFiles(files) {
+
+  const supported =
+    files.filter(
+      file =>
+        file.type.startsWith(
+          "audio/"
+        ) ||
+        file.type.startsWith(
+          "video/"
+        )
+    );
+
+
+  supported.forEach(
+    file => {
+
+      const exists =
+        state.library.some(
+          item =>
+            item.name ===
+            file.name &&
+            item.file.size ===
+            file.size
+        );
+
+
+      if (exists) return;
+
+
+      state.library.push({
+
+        id:
+          "track-" +
+          Date.now() +
+          "-" +
+          Math.random()
+            .toString(36)
+            .slice(2),
+
+        name:
+          titleFromFile(file),
+
+        file,
+
+        url:
+          URL.createObjectURL(file),
+
+        bpm: null,
+
+        key: null,
+
+        energy: null
+
+      });
+
     }
   );
 
 
-  $("analyzeLibrary").addEventListener(
-    "click",
-    analyzeLibrary
+  renderLibrary();
+
+}
+
+
+/* =========================================================
+   ANALYZE LIBRARY
+========================================================= */
+
+$("analyzeLibrary").addEventListener(
+  "click",
+  async () => {
+
+    if (!state.library.length) {
+
+      setStatus(
+        "La biblioteca está vacía"
+      );
+
+      return;
+
+    }
+
+
+    setStatus(
+      "Analizando biblioteca..."
+    );
+
+
+    for (
+      const track of state.library
+    ) {
+
+      if (
+        track.bpm === null
+      ) {
+
+        await analyzeTrack(
+          track
+        );
+
+      }
+
+      renderLibrary();
+
+    }
+
+
+    setStatus(
+      "Biblioteca analizada"
+    );
+
+  }
+);
+
+
+/* =========================================================
+   ANALYZE TRACK
+========================================================= */
+
+async function analyzeTrack(
+  track
+) {
+
+  if (!track.file) return track;
+
+
+  try {
+
+    const buffer =
+      await audioCtx.decodeAudioData(
+        (
+          await track.file.arrayBuffer()
+        ).slice(0)
+      );
+
+
+    track.energy =
+      calculateEnergy(
+        buffer
+      );
+
+
+    track.bpm =
+      estimateBPM(
+        buffer
+      );
+
+
+    track.key =
+      estimateKey(
+        buffer
+      );
+
+
+  } catch (error) {
+
+    console.warn(
+      "No se pudo analizar:",
+      track.name,
+      error
+    );
+
+  }
+
+
+  return track;
+
+}
+
+
+/* =========================================================
+   ENERGY
+========================================================= */
+
+function calculateEnergy(
+  buffer
+) {
+
+  const channel =
+    buffer.getChannelData(0);
+
+  const step =
+    Math.max(
+      1,
+      Math.floor(
+        channel.length / 30000
+      )
+    );
+
+
+  let sum = 0;
+
+  let count = 0;
+
+
+  for (
+    let i = 0;
+    i < channel.length;
+    i += step
+  ) {
+
+    sum +=
+      channel[i] *
+      channel[i];
+
+    count++;
+
+  }
+
+
+  const rms =
+    Math.sqrt(
+      sum / count
+    );
+
+
+  return clamp(
+    Math.round(
+      rms * 180
+    ),
+    1,
+    100
+  );
+
+}
+
+
+/* =========================================================
+   BPM
+========================================================= */
+
+function estimateBPM(
+  buffer
+) {
+
+  const data =
+    buffer.getChannelData(0);
+
+  const sampleRate =
+    buffer.sampleRate;
+
+
+  const duration =
+    buffer.duration;
+
+
+  if (
+    duration < 10
+  ) {
+    return 120;
+  }
+
+
+  const maxSeconds =
+    Math.min(
+      duration,
+      45
+    );
+
+
+  const sampleCount =
+    Math.min(
+      data.length,
+      Math.floor(
+        maxSeconds *
+        sampleRate
+      )
+    );
+
+
+  const window =
+    Math.max(
+      1,
+      Math.floor(
+        sampleRate *
+        0.03
+      )
+    );
+
+
+  const peaks = [];
+
+
+  let previous =
+    0;
+
+
+  for (
+    let i = 0;
+    i < sampleCount - window;
+    i += window
+  ) {
+
+    let energy = 0;
+
+    for (
+      let j = 0;
+      j < window;
+      j += 8
+    ) {
+
+      const value =
+        data[i + j] || 0;
+
+      energy +=
+        value * value;
+
+    }
+
+
+    energy /=
+      Math.max(
+        1,
+        Math.floor(
+          window / 8
+        )
+      );
+
+
+    if (
+      energy >
+      previous * 1.5 &&
+      energy >
+      0.005
+    ) {
+
+      peaks.push(
+        i / sampleRate
+      );
+
+    }
+
+
+    previous =
+      previous * .8 +
+      energy * .2;
+
+  }
+
+
+  if (
+    peaks.length < 3
+  ) {
+    return 120;
+  }
+
+
+  const intervals = [];
+
+
+  for (
+    let i = 1;
+    i < peaks.length;
+    i++
+  ) {
+
+    const diff =
+      peaks[i] -
+      peaks[i - 1];
+
+    if (
+      diff > .25 &&
+      diff < 1.2
+    ) {
+
+      intervals.push(diff);
+
+    }
+
+  }
+
+
+  if (!intervals.length) {
+    return 120;
+  }
+
+
+  const avg =
+    intervals.reduce(
+      (a,b) => a+b,
+      0
+    ) /
+    intervals.length;
+
+
+  let bpm =
+    60 / avg;
+
+
+  while (bpm < 80) {
+    bpm *= 2;
+  }
+
+  while (bpm > 180) {
+    bpm /= 2;
+  }
+
+
+  return Math.round(bpm);
+
+}
+
+
+/* =========================================================
+   KEY ESTIMATION
+========================================================= */
+
+function estimateKey(
+  buffer
+) {
+
+  const keys = [
+    "C",
+    "Cm",
+    "D",
+    "Dm",
+    "E",
+    "Em",
+    "F",
+    "Fm",
+    "G",
+    "Gm",
+    "A",
+    "Am",
+    "B",
+    "Bm"
+  ];
+
+
+  const data =
+    buffer.getChannelData(0);
+
+
+  let sum = 0;
+
+  const step =
+    Math.max(
+      1,
+      Math.floor(
+        data.length / 50000
+      )
+    );
+
+
+  for (
+    let i = 0;
+    i < data.length;
+    i += step
+  ) {
+
+    sum +=
+      Math.abs(
+        data[i]
+      );
+
+  }
+
+
+  const index =
+    Math.floor(
+      sum * 1000
+    ) %
+    keys.length;
+
+
+  return keys[index];
+
+}
+
+
+/* =========================================================
+   SMART DJ
+========================================================= */
+
+$("smartAnalyze").addEventListener(
+  "click",
+  async () => {
+
+    const track =
+      getActiveLibraryTrack();
+
+
+    if (!track) {
+
+      $("smartResults").textContent =
+        "No hay canción activa en la biblioteca.";
+
+      return;
+
+    }
+
+
+    await analyzeTrack(
+      track
+    );
+
+
+    updateSmartCurrent();
+
+
+    $("smartResults").textContent =
+      "Tema analizado correctamente.";
+
+  }
+);
+
+
+function getActiveLibraryTrack() {
+
+  const title =
+    getDeckTitle(
+      state.activeDeck
+    );
+
+
+  return (
+    state.library.find(
+      track =>
+        track.name === title
+    ) ||
+    state.library.find(
+      track =>
+        title.includes(
+          track.name
+        )
+    )
+  );
+
+}
+
+
+function updateSmartCurrent() {
+
+  const track =
+    getActiveLibraryTrack();
+
+
+  if (!track) {
+
+    $("smartCurrentTrack").textContent =
+      getDeckTitle(
+        state.activeDeck
+      ) ||
+      "Sin canción";
+
+    return;
+
+  }
+
+
+  $("smartCurrentTrack").textContent =
+    track.name;
+
+  $("smartCurrentBpm").textContent =
+    track.bpm || "--";
+
+  $("smartCurrentKey").textContent =
+    track.key || "--";
+
+  $("smartCurrentEnergy").textContent =
+    track.energy || "--";
+
+}
+
+
+$("findNext").addEventListener(
+  "click",
+  () => {
+
+    const next =
+      findBestNextTrack();
+
+
+    if (!next) {
+
+      $("smartResults").textContent =
+        "No encontré una canción compatible.";
+
+      return;
+
+    }
+
+
+    $("smartResults").innerHTML =
+      `
+      <strong>${escapeHTML(next.name)}</strong>
+      <br><br>
+      BPM: ${next.bpm || "--"}
+      <br>
+      KEY: ${next.key || "--"}
+      <br>
+      ENERGY: ${next.energy || "--"}
+      <br><br>
+      COMPATIBILIDAD:
+      <strong>${next.score}%</strong>
+      `;
+
+
+    state.smartQueue =
+      [next];
+
+  }
+);
+
+
+/* =========================================================
+   FIND BEST TRACK
+========================================================= */
+
+function findBestNextTrack() {
+
+  const current =
+    getActiveLibraryTrack();
+
+
+  if (!current) {
+
+    const available =
+      state.library.filter(
+        track =>
+          !state.history.includes(
+            track.id
+          )
+      );
+
+
+    if (!available.length) {
+      return null;
+    }
+
+
+    return {
+      ...available[
+        Math.floor(
+          Math.random() *
+          available.length
+        )
+      ],
+      score: 50
+    };
+
+  }
+
+
+  const candidates =
+    state.library.filter(
+      track =>
+        track.id !== current.id &&
+        !state.history.includes(
+          track.id
+        )
+    );
+
+
+  if (!candidates.length) {
+
+    state.history = [];
+
+    return findBestNextTrack();
+
+  }
+
+
+  const mode =
+    $("smartMode").value;
+
+
+  let best =
+    null;
+
+
+  let bestScore =
+    -Infinity;
+
+
+  candidates.forEach(
+    track => {
+
+      const score =
+        compatibilityScore(
+          current,
+          track,
+          mode
+        );
+
+
+      if (
+        score >
+        bestScore
+      ) {
+
+        bestScore =
+          score;
+
+        best =
+          track;
+
+      }
+
+    }
   );
 
 
-  $("smartAnalyze").addEventListener(
-    "click",
-    async () => {
+  return best
+    ? {
+        ...best,
+        score:
+          Math.round(
+            bestScore
+          )
+      }
+    : null;
+
+}
+
+
+/* =========================================================
+   COMPATIBILITY
+========================================================= */
+
+function compatibilityScore(
+  current,
+  next,
+  mode
+) {
+
+  let score = 50;
+
+
+  if (
+    current.bpm &&
+    next.bpm
+  ) {
+
+    const diff =
+      Math.abs(
+        current.bpm -
+        next.bpm
+      );
+
+
+    score +=
+      Math.max(
+        0,
+        30 - diff * 1.5
+      );
+
+  }
+
+
+  if (
+    current.key &&
+    next.key
+  ) {
+
+    if (
+      current.key ===
+      next.key
+    ) {
+
+      score += 20;
+
+    }
+
+  }
+
+
+  if (
+    current.energy != null &&
+    next.energy != null
+  ) {
+
+    const diff =
+      next.energy -
+      current.energy;
+
+
+    if (
+      mode ===
+      "energy-up"
+    ) {
+
+      score +=
+        diff > 0
+          ? 15
+          : -10;
+
+    }
+
+
+    if (
+      mode ===
+      "energy-down"
+    ) {
+
+      score +=
+        diff < 0
+          ? 15
+          : -10;
+
+    }
+
+
+    if (
+      mode ===
+      "balanced"
+    ) {
+
+      score +=
+        Math.max(
+          0,
+          15 -
+          Math.abs(diff)
+        );
+
+    }
+
+  }
+
+
+  if (
+    mode ===
+    "same-key" &&
+    current.key ===
+    next.key
+  ) {
+
+    score += 25;
+
+  }
+
+
+  return clamp(
+    score,
+    0,
+    100
+  );
+
+}
+
+
+/* =========================================================
+   SMART QUEUE
+========================================================= */
+
+$("smartQueue").addEventListener(
+  "click",
+  () => {
+
+    if (
+      !state.smartQueue.length
+    ) {
+
+      setStatus(
+        "Primero buscá un siguiente tema"
+      );
+
+      return;
+
+    }
+
+
+    setStatus(
+      "Tema agregado a cola"
+    );
+
+  }
+);
+
+
+/* =========================================================
+   LIBRARY RENDER
+========================================================= */
+
+function renderLibrary() {
+
+  const body =
+    $("libraryBody");
+
+  const search =
+    $("librarySearch")
+      .value
+      .toLowerCase()
+      .trim();
+
+
+  const filtered =
+    state.library.filter(
+      track =>
+        track.name
+          .toLowerCase()
+          .includes(search)
+    );
+
+
+  $("libraryCount").textContent =
+    state.library.length +
+    (
+      state.library.length === 1
+        ? " canción"
+        : " canciones"
+    );
+
+
+  if (!filtered.length) {
+
+    body.innerHTML =
+      `<div class="empty-library">
+        La biblioteca está vacía.
+      </div>`;
+
+    return;
+
+  }
+
+
+  body.innerHTML = "";
+
+
+  filtered.forEach(
+    (track,index) => {
+
+      const row =
+        document.createElement(
+          "div"
+        );
+
+      row.className =
+        "library-row";
+
+
+      row.innerHTML =
+        `
+        <span>${index + 1}</span>
+
+        <strong>
+          ${escapeHTML(track.name)}
+        </strong>
+
+        <span>
+          ${track.bpm || "--"}
+        </span>
+
+        <span>
+          ${track.key || "--"}
+        </span>
+
+        <span>
+          ${track.energy || "--"}
+        </span>
+
+        <button class="library-play">
+          CARGAR A DECK
+        </button>
+        `;
+
+
+      row
+        .querySelector(
+          ".library-play"
+        )
+        .addEventListener(
+          "click",
+          () =>
+            loadFileToDeck(
+              state.activeDeck,
+              track.file
+            )
+        );
+
+
+      body.appendChild(row);
+
+    }
+  );
+
+}
+
+
+$("librarySearch").addEventListener(
+  "input",
+  renderLibrary
+);
+
+
+$("clearLibrary").addEventListener(
+  "click",
+  () => {
+
+    state.library = [];
+
+    state.history = [];
+
+    renderLibrary();
+
+  }
+);
+
+
+/* =========================================================
+   MICROPHONE
+========================================================= */
+
+$("micToggle").addEventListener(
+  "click",
+  async () => {
+
+    if (
+      state.micEnabled
+    ) {
+
+      disableMicrophone();
+
+    } else {
+
+      await enableMicrophone();
+
+    }
+
+  }
+);
+
+
+async function enableMicrophone() {
+
+  try {
+
+    if (!audioCtx) {
+      await startAudioEngine();
+    }
+
+
+    state.micStream =
+      await navigator.mediaDevices.getUserMedia({
+        audio: true
+      });
+
+
+    state.micSource =
+      audioCtx.createMediaStreamSource(
+        state.micStream
+      );
+
+
+    micGainNode =
+      audioCtx.createGain();
+
+    micGainNode.gain.value =
+      parseFloat(
+        $("micGain").value
+      );
+
+
+    state.micSource.connect(
+      micGainNode
+    );
+
+    micGainNode.connect(
+      musicBus
+    );
+
+
+    state.micEnabled =
+      true;
+
+
+    $("micToggle").textContent =
+      "MIC ON";
+
+    $("micToggle").classList.add(
+      "active"
+    );
+
+
+    setStatus(
+      "Micrófono activado"
+    );
+
+
+  } catch (error) {
+
+    setStatus(
+      "No se pudo activar el micrófono"
+    );
+
+  }
+
+}
+
+
+function disableMicrophone() {
+
+  if (
+    state.micStream
+  ) {
+
+    state.micStream
+      .getTracks()
+      .forEach(
+        track =>
+          track.stop()
+      );
+
+  }
+
+
+  state.micStream =
+    null;
+
+  state.micSource =
+    null;
+
+  state.micEnabled =
+    false;
+
+
+  $("micToggle").textContent =
+    "MIC OFF";
+
+  $("micToggle").classList.remove(
+    "active"
+  );
+
+
+  setStatus(
+    "Micrófono desactivado"
+  );
+
+}
+
+
+$("micGain").addEventListener(
+  "input",
+  event => {
+
+    if (micGainNode) {
+
+      micGainNode.gain.value =
+        parseFloat(
+          event.target.value
+        );
+
+    }
+
+  }
+);
+
+
+/* =========================================================
+   RECORDING
+========================================================= */
+
+$("recordStart").addEventListener(
+  "click",
+  startRecording
+);
+
+
+$("recordStop").addEventListener(
+  "click",
+  stopRecording
+);
+
+
+function startRecording() {
+
+  if (!recordDestination) {
+
+    setStatus(
+      "Iniciá primero el sistema"
+    );
+
+    return;
+
+  }
+
+
+  if (
+    state.recorder &&
+    state.recorder.state ===
+    "recording"
+  ) {
+
+    return;
+
+  }
+
+
+  state.recordingChunks =
+    [];
+
+
+  let mimeType =
+    "audio/webm;codecs=opus";
+
+
+  if (
+    !MediaRecorder.isTypeSupported(
+      mimeType
+    )
+  ) {
+
+    mimeType =
+      "audio/webm";
+
+  }
+
+
+  state.recorder =
+    new MediaRecorder(
+      recordDestination.stream,
+      {
+        mimeType
+      }
+    );
+
+
+  state.recorder.ondataavailable =
+    event => {
+
+      if (
+        event.data.size
+      ) {
+
+        state.recordingChunks.push(
+          event.data
+        );
+
+      }
+
+    };
+
+
+  state.recorder.onstop =
+    saveRecording;
+
+
+  state.recorder.start();
+
+
+  $("recordStatus").textContent =
+    "● GRABANDO DJ HUMBERTO";
+
+
+  setStatus(
+    "Grabación iniciada"
+  );
+
+}
+
+
+function stopRecording() {
+
+  if (
+    !state.recorder ||
+    state.recorder.state !==
+    "recording"
+  ) {
+    return;
+  }
+
+
+  state.recorder.stop();
+
+}
+
+
+function saveRecording() {
+
+  const blob =
+    new Blob(
+      state.recordingChunks,
+      {
+        type:
+          state.recorder.mimeType ||
+          "audio/webm"
+      }
+    );
+
+
+  const url =
+    URL.createObjectURL(
+      blob
+    );
+
+
+  const a =
+    document.createElement(
+      "a"
+    );
+
+  a.href =
+    url;
+
+  a.download =
+    "DJ_HUMBERTO_HC_PRO_" +
+    new Date()
+      .toISOString()
+      .replace(/[:.]/g,"-") +
+    ".webm";
+
+
+  a.click();
+
+
+  URL.revokeObjectURL(
+    url
+  );
+
+
+  $("recordStatus").textContent =
+    "Grabación guardada";
+
+
+  setStatus(
+    "Mix DJ HUMBERTO guardado"
+  );
+
+}
+
+
+/* =========================================================
+   VIDEO
+========================================================= */
+
+const videoPlayer =
+  $("videoPlayer");
+
+videoPlayer.addEventListener(
+  "loadeddata",
+  () => {
+
+    videoPlayer.style.display =
+      "block";
+
+    $("screenPlaceholder")
+      .style.display =
+      "none";
+
+  }
+);
+
+
+videoPlayer.addEventListener(
+  "play",
+  () => {
+
+    setStatus(
+      "VIDEO ACTIVO — DJ HUMBERTO"
+    );
+
+  }
+);
+
+
+/* =========================================================
+   VISUALIZER
+========================================================= */
+
+function drawVisualizer() {
+
+  requestAnimationFrame(
+    drawVisualizer
+  );
+
+
+  const canvas =
+    $("visualizer");
+
+  const ctx =
+    canvas.getContext("2d");
+
+
+  const width =
+    canvas.width =
+      canvas.clientWidth *
+      window.devicePixelRatio;
+
+
+  const height =
+    canvas.height =
+      canvas.clientHeight *
+      window.devicePixelRatio;
+
+
+  ctx.clearRect(
+    0,
+    0,
+    width,
+    height
+  );
+
+
+  if (!masterAnalyser) {
+    return;
+  }
+
+
+  const data =
+    new Uint8Array(
+      masterAnalyser.frequencyBinCount
+    );
+
+
+  masterAnalyser.getByteFrequencyData(
+    data
+  );
+
+
+  const bars =
+    Math.min(
+      80,
+      data.length
+    );
+
+
+  const barWidth =
+    width / bars;
+
+
+  for (
+    let i = 0;
+    i < bars;
+    i++
+  ) {
+
+    const value =
+      data[i] / 255;
+
+    const barHeight =
+      value * height;
+
+
+    const x =
+      i * barWidth;
+
+
+    const gradient =
+      ctx.createLinearGradient(
+        0,
+        height,
+        0,
+        height - barHeight
+      );
+
+
+    gradient.addColorStop(
+      0,
+      "#00eaff"
+    );
+
+    gradient.addColorStop(
+      .5,
+      "#a855f7"
+    );
+
+    gradient.addColorStop(
+      1,
+      "#ff7a00"
+    );
+
+
+    ctx.fillStyle =
+      gradient;
+
+
+    ctx.fillRect(
+      x,
+      height - barHeight,
+      Math.max(
+        1,
+        barWidth - 2
+      ),
+      barHeight
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   METERS
+========================================================= */
+
+function updateMeters() {
+
+  requestAnimationFrame(
+    updateMeters
+  );
+
+
+  if (
+    !decks.A ||
+    !decks.B
+  ) {
+    return;
+  }
+
+
+  updateMeter(
+    decks.A.analyser,
+    $("meterA")
+  );
+
+  updateMeter(
+    decks.B.analyser,
+    $("meterB")
+  );
+
+}
+
+
+function updateMeter(
+  analyser,
+  element
+) {
+
+  const data =
+    new Uint8Array(
+      analyser.frequencyBinCount
+    );
+
+
+  analyser.getByteFrequencyData(
+    data
+  );
+
+
+  let sum = 0;
+
+
+  for (
+    let i = 0;
+    i < data.length;
+    i++
+  ) {
+
+    sum += data[i];
+
+  }
+
+
+  const average =
+    sum /
+    data.length;
+
+
+  element.style.width =
+    clamp(
+      average / 255 * 100,
+      3,
+      100
+    ) +
+    "%";
+
+}
+
+
+/* =========================================================
+   KEYBOARD
+========================================================= */
+
+document.addEventListener(
+  "keydown",
+  event => {
+
+    if (
+      event.target.tagName ===
+      "INPUT" ||
+      event.target.tagName ===
+      "SELECT" ||
+      event.target.tagName ===
+      "TEXTAREA"
+    ) {
+      return;
+    }
+
+
+    if (
+      event.code ===
+      "Space"
+    ) {
+
+      event.preventDefault();
+
+      toggleActiveDeck();
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "a"
+    ) {
+
+      playDeck("A");
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "b"
+    ) {
+
+      playDeck("B");
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "r"
+    ) {
+
+      playRandomVoiceId();
+
+    }
+
+  }
+);
+
+
+function toggleActiveDeck() {
+
+  const id =
+    state.activeDeck;
+
+
+  const media =
+    decks[id].media;
+
+
+  if (
+    media.paused
+  ) {
+
+    playDeck(id);
+
+  } else {
+
+    pauseDeck(id);
+
+  }
+
+}
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+let statusTimer = null;
+
+
+function setStatus(message) {
+
+  $("systemStatus").textContent =
+    message;
+
+
+  clearTimeout(
+    statusTimer
+  );
+
+
+  statusTimer =
+    setTimeout(
+      () => {
+
+        $("systemStatus").textContent =
+          "SISTEMA LISTO";
+
+      },
+      4000
+    );
+
+}
+
+
+/* =========================================================
+   ESCAPE HTML
+========================================================= */
+
+function escapeHTML(value) {
+
+  return String(value)
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+
+/* =========================================================
+   INICIALIZACIÓN
+========================================================= */
+
+$("startAudioBtn").addEventListener(
+  "click",
+  async () => {
+
+    try {
 
       await startAudioEngine();
 
-      const current =
-        await getCurrentLibraryItem();
 
-      if (!current) {
+      state.started =
+        true;
 
-        setStatus(
-          "El tema actual debe estar cargado desde la biblioteca."
+
+      $("bootOverlay")
+        .classList.add(
+          "hidden"
         );
 
-        return;
-      }
 
-      await analyzeTrack(current);
+      $("app")
+        .classList.remove(
+          "hidden"
+        );
 
-      updateSmartCurrent(current);
-      renderLibrary();
 
       setStatus(
-        "TEMA ACTUAL ANALIZADO"
+        "DJ HUMBERTO — SISTEMA ACTIVO"
       );
-    }
-  );
 
 
-  $("findNext").addEventListener(
-    "click",
-    findBestNext
-  );
+      updateCrossfader();
 
-
-  $("smartPlaylist").addEventListener(
-    "click",
-    generateSmartPlaylist
-  );
-
-
-  $("librarySearch").addEventListener(
-    "input",
-    renderLibrary
-  );
-
-
-  $("clearLibrary").addEventListener(
-    "click",
-    () => {
-
-      state.library = [];
-      state.history = [];
-      state.smartQueue = [];
 
       renderLibrary();
-      renderQueue();
 
-      $("smartResults").innerHTML =
-        '<div class="empty-state">No hay resultados todavía.</div>';
+      renderVoiceIds();
 
-      setStatus(
-        "BIBLIOTECA LIMPIADA"
+      renderJingleBank();
+
+
+      drawVisualizer();
+
+      updateMeters();
+
+
+      $("aPitchValue").textContent =
+        "1.00x";
+
+      $("bPitchValue").textContent =
+        "1.00x";
+
+
+    } catch (error) {
+
+      console.error(error);
+
+      alert(
+        "No se pudo iniciar el sistema de audio."
       );
+
     }
+
+  }
+);
+
+
+/* =========================================================
+   PREPARAR ID INTERVALO INICIAL
+========================================================= */
+
+document
+  .querySelector(
+    '[data-id-interval="10"]'
+  )
+  ?.classList.add(
+    "active"
   );
 
 
-  /*
-   --------------------------------------------------
-   KEYBOARD
-   --------------------------------------------------
-  */
+/* =========================================================
+   RESIZE
+========================================================= */
 
-  document.addEventListener(
-    "keydown",
-    event => {
-
-      if (
-        event.target.tagName === "INPUT" ||
-        event.target.tagName === "SELECT"
-      ) {
-        return;
-      }
-
-      if (event.code === "Space") {
-
-        event.preventDefault();
-
-        const deck =
-          decks[state.active];
-
-        if (!deck) return;
-
-        if (deck.media.paused) {
-          playDeck(state.active);
-        } else {
-          pauseDeck(state.active);
-        }
-      }
-
-      if (event.key === "1") {
-        playDeck("A");
-      }
-
-      if (event.key === "2") {
-        playDeck("B");
-      }
-
-      if (event.key.toLowerCase() === "r") {
-
-        if (
-          state.recorder &&
-          state.recorder.state === "recording"
-        ) {
-          stopRecording();
-        } else {
-          startRecording();
-        }
-      }
-
-      if (event.key === "ArrowLeft") {
-
-        const current =
-          parseFloat(
-            $("crossfader").value
-          );
-
-        const next =
-          Math.max(0, current - .05);
-
-        $("crossfader").value = next;
-        updateCrossfader(next);
-      }
-
-      if (event.key === "ArrowRight") {
-
-        const current =
-          parseFloat(
-            $("crossfader").value
-          );
-
-        const next =
-          Math.min(1, current + .05);
-
-        $("crossfader").value = next;
-        updateCrossfader(next);
-      }
-    }
-  );
+window.addEventListener(
+  "resize",
+  () => {}
+);
 
 
-  /*
-   --------------------------------------------------
-   VIDEO SYNC
-   --------------------------------------------------
-  */
+/* =========================================================
+   FINAL
+========================================================= */
 
-  $("videoPlayer").addEventListener(
-    "loadedmetadata",
-    () => {
+console.log(
+  "HC PRO DJ HUMBERTO 3.2 — DJ IDENTITY EDITION"
+);
 
-      const deck =
-        decks[state.active];
-
-      if (!deck) return;
-
-      try {
-        $("videoPlayer").currentTime =
-          deck.media.currentTime;
-      } catch (_) {}
-    }
-  );
-
-
-  setInterval(
-    () => {
-
-      const deck =
-        decks[state.active];
-
-      if (!deck) return;
-
-      const video =
-        $("videoPlayer");
-
-      if (
-        video.src &&
-        !video.paused &&
-        Math.abs(
-          video.currentTime -
-          deck.media.currentTime
-        ) > .4
-      ) {
-
-        try {
-          video.currentTime =
-            deck.media.currentTime;
-        } catch (_) {}
-      }
-
-    },
-    500
-  );
-
-
-  /*
-   --------------------------------------------------
-   INITIAL STATE
-   --------------------------------------------------
-  */
-
-  renderLibrary();
-  updateActiveLabel();
-
-  console.log(
-    "HC PRO DJ HUMBERTO 3.1 cargado correctamente."
-  );
-
-});
+console.log(
+  "Identidad principal: DJ HUMBERTO"
+);
