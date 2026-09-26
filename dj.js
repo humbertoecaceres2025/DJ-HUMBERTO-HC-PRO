@@ -1,7 +1,7 @@
 /* =========================================================
    HC PRO DJ HUMBERTO
    SMART DJ ENGINE
-   AUTO DJ + SMART NEXT + CROSSFADER
+   A ↔ B AUTOMATIC MIXING
 ========================================================= */
 
 "use strict";
@@ -14,35 +14,10 @@
 const $ = id => document.getElementById(id);
 
 const clamp = (value, min, max) =>
-    Math.min(Math.max(value, min), max);
+  Math.min(max, Math.max(min, value));
 
-const sleep = ms =>
-    new Promise(resolve => setTimeout(resolve, ms));
-
-
-/* =========================================================
-   CONFIG
-========================================================= */
-
-const CONFIG = {
-
-    defaultMaster: 0.85,
-
-    crossCurve: 0.70710678,
-
-    autoLookAhead: 18,
-
-    phraseSeconds: 8,
-
-    bpmTolerance: 0.10,
-
-    recentLimit: 8,
-
-    analysisDuration: 90,
-
-    defaultBpm: 120
-
-};
+const oppositeDeck = deck =>
+  deck === "A" ? "B" : "A";
 
 
 /* =========================================================
@@ -51,195 +26,110 @@ const CONFIG = {
 
 const state = {
 
-    ctx: null,
+  ctx: null,
 
-    started: false,
+  masterGain: null,
+  musicBus: null,
+  compressor: null,
+  analyser: null,
 
-    masterGain: null,
+  decks: {
+    A: null,
+    B: null
+  },
 
-    musicBus: null,
+  activeDeck: "A",
 
-    compressor: null,
+  crossPosition: 0,
 
-    analyser: null,
+  autoDJ: false,
 
-    recordDestination: null,
+  smartDJ: true,
 
-    recorder: null,
+  transitionRunning: false,
 
-    recordChunks: [],
+  transitionToken: 0,
 
-    recording: false,
+  library: [],
 
-    activeDeck: "A",
+  history: [],
 
-    transition: false,
+  animationFrame: null,
 
-    transitionToken: 0,
+  autoTimer: null,
 
-    crossPosition: 0.5,
-
-    autoDJ: false,
-
-    smartDJ: true,
-
-    library: [],
-
-    history: [],
-
-    voiceFiles: [],
-
-    voiceEnabled: false,
-
-    voiceTimer: null,
-
-    voiceBusy: false,
-
-    animation: null,
-
-    decks: {
-
-        A: null,
-
-        B: null
-
-    }
+  started: false
 
 };
 
 
 /* =========================================================
-   DECK CREATION
+   INIT
 ========================================================= */
 
-function createDeck(letter) {
+document.addEventListener("DOMContentLoaded", () => {
 
-    const audio =
-        $(`audio${letter}`);
+  initDeckObjects();
 
-    const source =
-        state.ctx.createMediaElementSource(audio);
+  bindEvents();
 
-    const inputGain =
-        state.ctx.createGain();
+  renderLibrary();
 
-    const low =
-        state.ctx.createBiquadFilter();
+  updateCrossfader(0);
 
-    const mid =
-        state.ctx.createBiquadFilter();
+  updateActiveDeckUI();
 
-    const high =
-        state.ctx.createBiquadFilter();
-
-    const volumeGain =
-        state.ctx.createGain();
-
-    const crossGain =
-        state.ctx.createGain();
+});
 
 
-    low.type = "lowshelf";
-    low.frequency.value = 180;
+/* =========================================================
+   DECK OBJECTS
+========================================================= */
 
-    mid.type = "peaking";
-    mid.frequency.value = 1000;
-    mid.Q.value = 0.8;
+function initDeckObjects() {
 
-    high.type = "highshelf";
-    high.frequency.value = 5000;
+  ["A", "B"].forEach(letter => {
 
+    const audio = $("audio" + letter);
 
-    inputGain.gain.value = 1;
+    state.decks[letter] = {
 
-    volumeGain.gain.value = 1;
+      letter,
 
-    crossGain.gain.value =
-        CONFIG.crossCurve;
+      audio,
 
+      source: null,
 
-    source
-        .connect(inputGain)
-        .connect(low)
-        .connect(mid)
-        .connect(high)
-        .connect(volumeGain)
-        .connect(crossGain)
-        .connect(state.musicBus);
+      inputGain: null,
 
+      low: null,
 
-    const deck = {
+      mid: null,
 
-        letter,
+      high: null,
 
-        audio,
+      volumeGain: null,
 
-        source,
+      crossGain: null,
 
-        inputGain,
+      file: null,
 
-        low,
+      url: null,
 
-        mid,
+      meta: null,
 
-        high,
+      ready: false,
 
-        volumeGain,
+      playing: false,
 
-        crossGain,
+      preparedFor: null,
 
-        file: null,
-
-        url: null,
-
-        meta: null,
-
-        ready: false,
-
-        isVideo: false
+      video: false
 
     };
 
+  });
 
-    audio.addEventListener(
-        "ended",
-        () => handleDeckEnded(letter)
-    );
-
-
-    audio.addEventListener(
-        "play",
-        () => {
-
-            $(`deckPanel${letter}`)
-                .classList.add("playing");
-
-            $(`status${letter}`)
-                .textContent = "PLAYING";
-
-        }
-    );
-
-
-    audio.addEventListener(
-        "pause",
-        () => {
-
-            $(`deckPanel${letter}`)
-                .classList.remove("playing");
-
-            if (!audio.ended) {
-
-                $(`status${letter}`)
-                    .textContent = "PAUSED";
-            }
-        }
-    );
-
-
-    state.decks[letter] = deck;
-
-    return deck;
 }
 
 
@@ -247,1809 +137,554 @@ function createDeck(letter) {
    AUDIO ENGINE
 ========================================================= */
 
-async function startEngine() {
+async function initAudioEngine() {
 
-    if (state.started) {
+  if (state.ctx) {
 
-        if (state.ctx.state === "suspended") {
-
-            await state.ctx.resume();
-        }
-
-        return;
+    if (state.ctx.state === "suspended") {
+      await state.ctx.resume();
     }
 
+    return;
+  }
 
-    const AudioContext =
-        window.AudioContext ||
-        window.webkitAudioContext;
 
-    if (!AudioContext) {
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
 
-        alert(
-            "Este navegador no soporta Web Audio."
+  if (!AudioContext) {
+
+    alert(
+      "Este navegador no soporta Web Audio API."
+    );
+
+    return;
+  }
+
+
+  state.ctx = new AudioContext();
+
+
+  state.musicBus =
+    state.ctx.createGain();
+
+  state.musicBus.gain.value = 1;
+
+
+  state.masterGain =
+    state.ctx.createGain();
+
+  state.masterGain.gain.value = .9;
+
+
+  state.compressor =
+    state.ctx.createDynamicsCompressor();
+
+  state.compressor.threshold.value = -18;
+  state.compressor.knee.value = 18;
+  state.compressor.ratio.value = 4;
+  state.compressor.attack.value = .003;
+  state.compressor.release.value = .25;
+
+
+  state.analyser =
+    state.ctx.createAnalyser();
+
+  state.analyser.fftSize = 2048;
+
+
+  state.musicBus
+    .connect(state.masterGain);
+
+  state.masterGain
+    .connect(state.compressor);
+
+  state.compressor
+    .connect(state.analyser);
+
+  state.analyser
+    .connect(state.ctx.destination);
+
+
+  ["A", "B"].forEach(letter => {
+
+    setupDeckAudio(
+      state.decks[letter]
+    );
+
+  });
+
+
+  if (state.ctx.state === "suspended") {
+    await state.ctx.resume();
+  }
+
+
+  state.started = true;
+
+  $("engineStatus").textContent =
+    "● SISTEMA ONLINE";
+
+  $("engineStatus").className =
+    "status-pill online";
+
+
+  startVisualizer();
+
+}
+
+
+/* =========================================================
+   SETUP DECK
+========================================================= */
+
+function setupDeckAudio(deck) {
+
+  if (deck.source) return;
+
+
+  const ctx = state.ctx;
+
+
+  deck.source =
+    ctx.createMediaElementSource(
+      deck.audio
+    );
+
+
+  deck.inputGain =
+    ctx.createGain();
+
+  deck.volumeGain =
+    ctx.createGain();
+
+  deck.crossGain =
+    ctx.createGain();
+
+
+  deck.low =
+    ctx.createBiquadFilter();
+
+  deck.low.type = "lowshelf";
+  deck.low.frequency.value = 180;
+
+
+  deck.mid =
+    ctx.createBiquadFilter();
+
+  deck.mid.type = "peaking";
+  deck.mid.frequency.value = 1000;
+  deck.mid.Q.value = .8;
+
+
+  deck.high =
+    ctx.createBiquadFilter();
+
+  deck.high.type = "highshelf";
+  deck.high.frequency.value = 5000;
+
+
+  deck.volumeGain.gain.value = 1;
+
+
+  deck.source
+    .connect(deck.inputGain);
+
+  deck.inputGain
+    .connect(deck.low);
+
+  deck.low
+    .connect(deck.mid);
+
+  deck.mid
+    .connect(deck.high);
+
+  deck.high
+    .connect(deck.volumeGain);
+
+  deck.volumeGain
+    .connect(deck.crossGain);
+
+  deck.crossGain
+    .connect(state.musicBus);
+
+
+  deck.audio.addEventListener(
+    "play",
+    () => {
+
+      deck.playing = true;
+
+      updateDeckUI(deck.letter);
+
+      updateActiveDeckUI();
+
+    }
+  );
+
+
+  deck.audio.addEventListener(
+    "pause",
+    () => {
+
+      deck.playing = false;
+
+      updateDeckUI(deck.letter);
+
+    }
+  );
+
+
+  deck.audio.addEventListener(
+    "ended",
+    () => {
+
+      deck.playing = false;
+
+      updateDeckUI(deck.letter);
+
+      if (
+        state.autoDJ &&
+        state.activeDeck === deck.letter
+      ) {
+
+        transitionTo(
+          oppositeDeck(deck.letter)
         );
 
-        return;
+      }
+
     }
+  );
+
+}
 
 
-    state.ctx =
-        new AudioContext();
+/* =========================================================
+   EVENTS
+========================================================= */
+
+function bindEvents() {
 
 
-    state.musicBus =
-        state.ctx.createGain();
+  $("startEngine").addEventListener(
+    "click",
+    async () => {
 
-    state.compressor =
-        state.ctx.createDynamicsCompressor();
+      await initAudioEngine();
 
-    state.masterGain =
-        state.ctx.createGain();
+      $("bootOverlay")
+        .classList.add("hidden");
 
-    state.analyser =
-        state.ctx.createAnalyser();
+      $("mediaStatus").textContent =
+        "SMART DJ LISTO";
 
-
-    state.musicBus.gain.value = 1;
-
-    state.masterGain.gain.value =
-        CONFIG.defaultMaster;
+    }
+  );
 
 
-    state.compressor.threshold.value = -18;
-    state.compressor.knee.value = 12;
-    state.compressor.ratio.value = 4;
-    state.compressor.attack.value = .003;
-    state.compressor.release.value = .2;
+  $("fullscreenButton")
+    .addEventListener(
+      "click",
+      toggleFullscreen
+    );
 
 
-    state.analyser.fftSize = 2048;
+  $("crossfader")
+    .addEventListener(
+      "input",
+      event => {
+
+        const value =
+          Number(event.target.value);
+
+        state.crossPosition = value;
+
+        updateCrossfader(value);
+
+      }
+    );
 
 
-    state.musicBus
-        .connect(state.compressor)
-        .connect(state.masterGain)
-        .connect(state.analyser)
-        .connect(state.ctx.destination);
+  $("smartNextButton")
+    .addEventListener(
+      "click",
+      async () => {
+
+        await ensureAudio();
+
+        await smartNext(true);
+
+      }
+    );
 
 
-    state.recordDestination =
-        state.ctx.createMediaStreamDestination();
+  $("autoDJButton")
+    .addEventListener(
+      "click",
+      async () => {
+
+        await ensureAudio();
+
+        toggleAutoDJ();
+
+      }
+    );
 
 
-    state.masterGain
-        .connect(state.recordDestination);
+  ["A", "B"].forEach(letter => {
+
+    $("play" + letter)
+      .addEventListener(
+        "click",
+        async () => {
+
+          await ensureAudio();
+
+          await playDeck(letter);
+
+        }
+      );
 
 
-    createDeck("A");
-    createDeck("B");
+    $("stop" + letter)
+      .addEventListener(
+        "click",
+        () => {
+
+          stopDeck(letter);
+
+        }
+      );
 
 
-    setupVoiceAudio();
+    $("volume" + letter)
+      .addEventListener(
+        "input",
+        event => {
 
+          const deck =
+            state.decks[letter];
+
+          if (deck.volumeGain) {
+
+            deck.volumeGain.gain.value =
+              Number(event.target.value);
+
+          }
+
+        }
+      );
+
+
+    $("pitch" + letter)
+      .addEventListener(
+        "input",
+        event => {
+
+          state.decks[letter]
+            .audio.playbackRate =
+              Number(event.target.value);
+
+        }
+      );
+
+
+    $("low" + letter)
+      .addEventListener(
+        "input",
+        event => {
+
+          const deck =
+            state.decks[letter];
+
+          if (deck.low) {
+
+            deck.low.gain.value =
+              Number(event.target.value);
+
+          }
+
+        }
+      );
+
+
+    $("mid" + letter)
+      .addEventListener(
+        "input",
+        event => {
+
+          const deck =
+            state.decks[letter];
+
+          if (deck.mid) {
+
+            deck.mid.gain.value =
+              Number(event.target.value);
+
+          }
+
+        }
+      );
+
+
+    $("high" + letter)
+      .addEventListener(
+        "input",
+        event => {
+
+          const deck =
+            state.decks[letter];
+
+          if (deck.high) {
+
+            deck.high.gain.value =
+              Number(event.target.value);
+
+          }
+
+        }
+      );
+
+  });
+
+
+  $("libraryFiles")
+    .addEventListener(
+      "change",
+      event => {
+
+        addFiles(
+          Array.from(
+            event.target.files
+          )
+        );
+
+      }
+    );
+
+
+  $("libraryFolder")
+    .addEventListener(
+      "change",
+      event => {
+
+        addFiles(
+          Array.from(
+            event.target.files
+          )
+        );
+
+      }
+    );
+
+
+  $("analyzeLibraryButton")
+    .addEventListener(
+      "click",
+      analyzeLibrary
+    );
+
+
+  $("searchLibrary")
+    .addEventListener(
+      "input",
+      renderLibrary
+    );
+
+
+  $("genreFilter")
+    .addEventListener(
+      "change",
+      renderLibrary
+    );
+
+}
+
+
+/* =========================================================
+   AUDIO START
+========================================================= */
+
+async function ensureAudio() {
+
+  if (!state.ctx) {
+
+    await initAudioEngine();
+
+  }
+
+  if (
+    state.ctx.state === "suspended"
+  ) {
 
     await state.ctx.resume();
 
+  }
 
-    state.started = true;
-
-
-    $("systemStatus")
-        .textContent = "SISTEMA ACTIVO";
-
-    $("systemLed")
-        .classList.add("active");
-
-
-    $("bootScreen").style.display = "none";
-
-
-    startVisualizer();
-
-    startClock();
-
-    startMeters();
-
-    startAutoDJLoop();
-
-    startVoiceTimer();
 }
 
 
 /* =========================================================
-   VOICE AUDIO
+   CROSS FADER
 ========================================================= */
 
-function setupVoiceAudio() {
+function updateCrossfader(position) {
 
-    const audio =
-        $("voiceAudio");
+  position =
+    clamp(position, 0, 1);
 
-    const source =
-        state.ctx.createMediaElementSource(audio);
 
-    const gain =
-        state.ctx.createGain();
+  state.crossPosition =
+    position;
 
-    gain.gain.value = .9;
 
-    source
-        .connect(gain)
-        .connect(state.masterGain);
-}
+  if (!state.ctx) return;
 
 
-/* =========================================================
-   FILE HELPERS
-========================================================= */
-
-function isMediaFile(file) {
-
-    if (!file) return false;
-
-    if (
-        file.type &&
-        (
-            file.type.startsWith("audio/") ||
-            file.type.startsWith("video/")
-        )
-    ) {
-        return true;
-    }
-
-    return /\.(mp3|wav|ogg|m4a|aac|flac|mp4|webm|mov)$/i
-        .test(file.name);
-}
-
-
-function isVideoFile(file) {
-
-    if (!file) return false;
-
-    if (
-        file.type &&
-        file.type.startsWith("video/")
-    ) {
-        return true;
-    }
-
-    return /\.(mp4|webm|mov|mkv)$/i
-        .test(file.name);
-}
-
-
-function fileId(file) {
-
-    return [
-        file.name,
-        file.size,
-        file.lastModified,
-        file.webkitRelativePath || ""
-    ].join("|");
-}
-
-
-/* =========================================================
-   GENRE
-========================================================= */
-
-function detectGenre(file) {
-
-    const text =
-        (
-            file.name +
-            " " +
-            (file.webkitRelativePath || "")
-        )
-        .toLowerCase();
-
-
-    const rules = {
-
-        cumbia: [
-            "cumbia",
-            "cuarteto",
-            "santafesina",
-            "villera"
-        ],
-
-        reggaeton: [
-            "reggaeton",
-            "reggaetón",
-            "perreo",
-            "urbano"
-        ],
-
-        rock: [
-            "rock",
-            "punk",
-            "metal",
-            "indie"
-        ],
-
-        pop: [
-            "pop",
-            "dance pop"
-        ],
-
-        electronic: [
-            "electro",
-            "electronic",
-            "house",
-            "techno",
-            "trance",
-            "edm",
-            "deep house"
-        ],
-
-        latin: [
-            "latin",
-            "latino",
-            "salsa",
-            "bachata",
-            "merengue"
-        ]
-
-    };
-
-
-    for (const genre in rules) {
-
-        if (
-            rules[genre]
-                .some(word => text.includes(word))
-        ) {
-            return genre;
-        }
-    }
-
-
-    return "other";
-}
-
-
-/* =========================================================
-   AUDIO ANALYSIS
-========================================================= */
-
-async function analyzeFile(file) {
-
-    if (!state.ctx) {
-        await startEngine();
-    }
-
-
-    const buffer =
-        await file.arrayBuffer();
-
-
-    let decoded;
-
-    try {
-
-        decoded =
-            await state.ctx.decodeAudioData(
-                buffer.slice(0)
-            );
-
-    } catch (error) {
-
-        console.warn(
-            "No se pudo analizar:",
-            file.name
-        );
-
-        return {
-
-            id: fileId(file),
-
-            file,
-
-            name: file.name,
-
-            bpm: CONFIG.defaultBpm,
-
-            energy: .5,
-
-            rhythm: .5,
-
-            genre: detectGenre(file),
-
-            key: "C",
-
-            camelot: "8B",
-
-            phrase: 8,
-
-            confidence: 0
-
-        };
-    }
-
-
-    const duration =
-        Math.min(
-            decoded.duration,
-            CONFIG.analysisDuration
-        );
-
-
-    const channelCount =
-        decoded.numberOfChannels;
-
-
-    const sampleRate =
-        decoded.sampleRate;
-
-
-    const length =
-        Math.floor(
-            duration * sampleRate
-        );
-
-
-    const mono =
-        new Float32Array(length);
-
-
-    for (
-        let ch = 0;
-        ch < channelCount;
-        ch++
-    ) {
-
-        const data =
-            decoded.getChannelData(ch);
-
-        for (
-            let i = 0;
-            i < length;
-            i++
-        ) {
-
-            mono[i] +=
-                data[i] / channelCount;
-        }
-    }
-
-
-    const downRate = 11025;
-
-    const step =
-        Math.max(
-            1,
-            Math.floor(
-                sampleRate / downRate
-            )
-        );
-
-
-    const smallLength =
-        Math.floor(length / step);
-
-
-    const small =
-        new Float32Array(smallLength);
-
-
-    for (
-        let i = 0;
-        i < smallLength;
-        i++
-    ) {
-
-        small[i] =
-            mono[i * step];
-    }
-
-
-    const frameSize = 1024;
-
-    const hop = 512;
-
-    const frames =
-        Math.max(
-            1,
-            Math.floor(
-                (small.length - frameSize) / hop
-            )
-        );
-
-
-    const envelope =
-        new Float32Array(frames);
-
-    const rms =
-        new Float32Array(frames);
-
-
-    let totalEnergy = 0;
-
-
-    for (
-        let f = 0;
-        f < frames;
-        f++
-    ) {
-
-        const start =
-            f * hop;
-
-
-        let sum = 0;
-
-        let diff = 0;
-
-
-        for (
-            let j = 0;
-            j < frameSize;
-            j++
-        ) {
-
-            const index =
-                start + j;
-
-            const value =
-                small[index] || 0;
-
-            sum += value * value;
-
-            if (index > 0) {
-
-                diff +=
-                    Math.abs(
-                        value -
-                        small[index - 1]
-                    );
-            }
-        }
-
-
-        const r =
-            Math.sqrt(
-                sum / frameSize
-            );
-
-
-        rms[f] = r;
-
-        envelope[f] =
-            diff / frameSize;
-
-        totalEnergy += r;
-    }
-
-
-    const averageRms =
-        totalEnergy / frames;
-
-
-    let maxRms = 0;
-
-    for (const value of rms) {
-
-        if (value > maxRms) {
-            maxRms = value;
-        }
-    }
-
-
-    const energy =
-        clamp(
-            maxRms
-                ? averageRms / maxRms
-                : .5,
-            0,
-            1
-        );
-
-
-    /* -----------------------------------------
-       BPM
-    ----------------------------------------- */
-
-    let envMax = 0;
-
-    for (const value of envelope) {
-
-        if (value > envMax) {
-            envMax = value;
-        }
-    }
-
-
-    if (envMax > 0) {
-
-        for (
-            let i = 0;
-            i < envelope.length;
-            i++
-        ) {
-
-            envelope[i] /= envMax;
-        }
-    }
-
-
-    const envelopeRate =
-        downRate / hop;
-
-
-    let bestBpm =
-        CONFIG.defaultBpm;
-
-    let bestScore = -Infinity;
-
-    let secondScore = -Infinity;
-
-
-    for (
-        let bpm = 70;
-        bpm <= 180;
-        bpm += .5
-    ) {
-
-        const lag =
-            Math.round(
-                envelopeRate * 60 / bpm
-            );
-
-
-        if (
-            lag < 2 ||
-            lag >= envelope.length
-        ) {
-            continue;
-        }
-
-
-        let score = 0;
-
-        let count = 0;
-
-
-        for (
-            let i = lag;
-            i < envelope.length;
-            i++
-        ) {
-
-            score +=
-                envelope[i] *
-                envelope[i - lag];
-
-            count++;
-        }
-
-
-        if (count > 0) {
-
-            score /= count;
-        }
-
-
-        if (score > bestScore) {
-
-            secondScore =
-                bestScore;
-
-            bestScore =
-                score;
-
-            bestBpm =
-                bpm;
-
-        } else if (
-            score > secondScore
-        ) {
-
-            secondScore =
-                score;
-        }
-    }
-
-
-    /*
-       Corrección de BPM armónico.
-       Evita detectar 70 cuando la canción
-       realmente está alrededor de 140.
-    */
-
-    if (bestBpm < 90) {
-
-        bestBpm *= 2;
-    }
-
-    if (bestBpm > 180) {
-
-        bestBpm /= 2;
-    }
-
-
-    const confidence =
-        bestScore > 0
-            ? clamp(
-                bestScore /
-                Math.max(
-                    bestScore +
-                    Math.abs(secondScore),
-                    .001
-                ),
-                0,
-                1
-            )
-            : 0;
-
-
-    const rhythm =
-        clamp(
-            bestScore * 5,
-            0,
-            1
-        );
-
-
-    /*
-       Key aproximada.
-
-       El análisis de key exacto de estudio
-       requiere FFT/chroma más avanzada.
-       Aquí se utiliza una estimación tonal
-       para ayudar al Smart DJ.
-    */
-
-    const keyInfo =
-        estimateKey(
-            small,
-            downRate
-        );
-
-
-    const genre =
-        detectGenre(file);
-
-
-    return {
-
-        id: fileId(file),
-
-        file,
-
-        name: file.name,
-
-        bpm: Math.round(bestBpm * 10) / 10,
-
-        energy: Math.round(energy * 100) / 100,
-
-        rhythm: Math.round(rhythm * 100) / 100,
-
-        genre,
-
-        key: keyInfo.key,
-
-        camelot: keyInfo.camelot,
-
-        phrase: detectPhraseLength(
-            bestBpm
-        ),
-
-        confidence:
-
-            Math.round(
-                confidence * 100
-            ) / 100,
-
-        duration: decoded.duration
-
-    };
-}
-
-
-/* =========================================================
-   KEY / CAMELOT
-========================================================= */
-
-function estimateKey(data, sampleRate) {
-
-    /*
-       Estimación tonal simplificada.
-
-       Se usa una matriz de perfiles de
-       pitch-class para obtener una tonalidad
-       aproximada.
-    */
-
-    const chroma =
-        new Array(12).fill(0);
-
-
-    const fftSize = 2048;
-
-    const hop = 1024;
-
-    const frames =
-        Math.min(
-            80,
-            Math.floor(
-                (data.length - fftSize) / hop
-            )
-        );
-
-
-    if (frames <= 0) {
-
-        return {
-            key: "C",
-            camelot: "8B"
-        };
-    }
-
-
-    /*
-       Detectamos energía en bandas
-       aproximadas de las 12 clases.
-    */
-
-    for (
-        let f = 0;
-        f < frames;
-        f++
-    ) {
-
-        const start =
-            f * hop;
-
-
-        for (
-            let k = 1;
-            k < fftSize / 2;
-            k += 3
-        ) {
-
-            const frequency =
-                k * sampleRate /
-                fftSize;
-
-
-            if (
-                frequency < 55 ||
-                frequency > 1760
-            ) {
-                continue;
-            }
-
-
-            const midi =
-                Math.round(
-                    69 +
-                    12 *
-                    Math.log2(
-                        frequency / 440
-                    )
-                );
-
-
-            const pitch =
-                ((midi % 12) + 12) % 12;
-
-
-            let energy = 0;
-
-
-            for (
-                let j = 0;
-                j < 16;
-                j++
-            ) {
-
-                const index =
-                    start +
-                    Math.floor(
-                        j *
-                        fftSize /
-                        16
-                    );
-
-                const value =
-                    data[index] || 0;
-
-                energy +=
-                    Math.abs(value);
-            }
-
-
-            chroma[pitch] +=
-                energy;
-        }
-    }
-
-
-    let root = 0;
-
-    let max = -Infinity;
-
-
-    for (
-        let i = 0;
-        i < 12;
-        i++
-    ) {
-
-        if (chroma[i] > max) {
-
-            max = chroma[i];
-
-            root = i;
-        }
-    }
-
-
-    const keys = [
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B"
-    ];
-
-
-    const key =
-        keys[root];
-
-
-    /*
-       Camelot mayor aproximado.
-    */
-
-    const camelotMap = {
-
-        C: "8B",
-        "C#": "3B",
-        D: "10B",
-        "D#": "5B",
-        E: "12B",
-        F: "7B",
-        "F#": "2B",
-        G: "9B",
-        "G#": "4B",
-        A: "11B",
-        "A#": "6B",
-        B: "1B"
-
-    };
-
-
-    return {
-
-        key,
-
-        camelot:
-            camelotMap[key] || "8B"
-
-    };
-}
-
-
-/* =========================================================
-   PHRASE
-========================================================= */
-
-function detectPhraseLength(bpm) {
-
-    /*
-       Un phrase DJ habitual puede ser
-       8 / 16 / 32 compases.
-
-       Para Smart DJ se trabaja inicialmente
-       con bloques de 16 compases.
-    */
-
-    const beatSeconds =
-        60 / Math.max(bpm, 1);
-
-    const phraseSeconds =
-        beatSeconds * 16;
-
-
-    return Math.round(
-        phraseSeconds
-    );
-}
-
-
-/* =========================================================
-   LIBRARY
-========================================================= */
-
-function addLibraryFiles(files) {
-
-    const valid =
-        Array.from(files)
-            .filter(isMediaFile);
-
-
-    for (const file of valid) {
-
-        const id =
-            fileId(file);
-
-
-        if (
-            state.library
-                .some(track => track.id === id)
-        ) {
-            continue;
-        }
-
-
-        state.library.push({
-
-            id,
-
-            file,
-
-            name: file.name,
-
-            genre: detectGenre(file),
-
-            analyzed: false,
-
-            bpm: null,
-
-            energy: null,
-
-            rhythm: null,
-
-            key: null,
-
-            camelot: null,
-
-            phrase: null,
-
-            confidence: 0
-
-        });
-    }
-
-
-    renderLibrary();
-}
-
-
-/* =========================================================
-   ANALYZE LIBRARY
-========================================================= */
-
-async function analyzeLibrary() {
-
-    if (!state.library.length) {
-
-        alert(
-            "Primero cargá archivos o una carpeta."
-        );
-
-        return;
-    }
-
-
-    const button =
-        $("analyzeLibrary");
-
-
-    button.disabled = true;
-
-    button.textContent =
-        "ANALIZANDO...";
-
-
-    for (
-        let i = 0;
-        i < state.library.length;
-        i++
-    ) {
-
-        const track =
-            state.library[i];
-
-
-        if (track.analyzed) {
-            continue;
-        }
-
-
-        $("smartReason").textContent =
-            `Analizando ${i + 1}/${state.library.length}: ${track.name}`;
-
-
-        try {
-
-            const result =
-                await analyzeFile(
-                    track.file
-                );
-
-
-            Object.assign(
-                track,
-                result,
-                {
-                    analyzed: true
-                }
-            );
-
-        } catch (error) {
-
-            console.error(error);
-        }
-
-
-        renderLibrary();
-
-        await sleep(20);
-    }
-
-
-    button.disabled = false;
-
-    button.textContent =
-        "ANALIZAR BIBLIOTECA";
-
-
-    $("smartReason").textContent =
-        "Biblioteca analizada. Smart DJ listo.";
-}
-
-
-/* =========================================================
-   RENDER LIBRARY
-========================================================= */
-
-function renderLibrary() {
-
-    const container =
-        $("libraryList");
-
-
-    const filter =
-        $("genreFilter").value;
-
-
-    const tracks =
-        state.library.filter(track => {
-
-            if (filter === "all") {
-                return true;
-            }
-
-            return track.genre === filter;
-        });
-
-
-    $("libraryCount").textContent =
-        state.library.length;
-
-
-    if (!tracks.length) {
-
-        container.innerHTML =
-            `<div class="empty-library">
-                NO HAY TEMAS PARA ESTE FILTRO
-             </div>`;
-
-        return;
-    }
-
-
-    container.innerHTML = "";
-
-
-    tracks.forEach(
-        (track, index) => {
-
-            const item =
-                document.createElement("div");
-
-
-            item.className =
-                "library-item";
-
-
-            const bpm =
-                track.bpm
-                    ? `${track.bpm} BPM`
-                    : "BPM --";
-
-
-            const key =
-                track.camelot
-                    ? `${track.camelot}`
-                    : "--";
-
-
-            item.innerHTML = `
-
-                <div class="library-index">
-                    ${index + 1}
-                </div>
-
-                <div class="library-name">
-
-                    ${escapeHtml(track.name)}
-
-                    <small>
-                        ${track.genre.toUpperCase()}
-                        ·
-                        ${key}
-                    </small>
-
-                </div>
-
-                <div class="library-stat">
-                    ${bpm}
-                </div>
-
-                <button class="library-load">
-                    CARGAR
-                </button>
-            `;
-
-
-            item
-                .querySelector(".library-load")
-                .addEventListener(
-                    "click",
-                    event => {
-
-                        event.stopPropagation();
-
-                        loadTrackSmart(
-                            track,
-                            state.activeDeck
-                        );
-                    }
-                );
-
-
-            item.addEventListener(
-                "dblclick",
-                () => {
-
-                    loadTrackSmart(
-                        track,
-                        state.activeDeck
-                    );
-                }
-            );
-
-
-            container.appendChild(item);
-        }
-    );
-}
-
-
-function escapeHtml(value) {
-
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-}
-
-
-/* =========================================================
-   SMART DJ SCORE
-========================================================= */
-
-function bpmDistance(a, b) {
-
-    if (!a || !b) {
-        return 1;
-    }
-
-
-    const candidates = [
-
-        b,
-
-        b * 2,
-
-        b / 2
-
-    ];
-
-
-    let best = Infinity;
-
-
-    for (const value of candidates) {
-
-        const distance =
-            Math.abs(a - value) /
-            Math.max(a, value);
-
-
-        best =
-            Math.min(
-                best,
-                distance
-            );
-    }
-
-
-    return clamp(
-        best,
-        0,
-        1
-    );
-}
-
-
-function genreCompatibility(a, b) {
-
-    if (a === b) {
-        return 1;
-    }
-
-
-    const related = {
-
-        cumbia: [
-            "latin"
-        ],
-
-        latin: [
-            "cumbia",
-            "reggaeton"
-        ],
-
-        reggaeton: [
-            "latin"
-        ],
-
-        pop: [
-            "electronic"
-        ],
-
-        electronic: [
-            "pop"
-        ],
-
-        rock: []
-
-    };
-
-
-    if (
-        related[a] &&
-        related[a].includes(b)
-    ) {
-        return .65;
-    }
-
-
-    return .25;
-}
-
-
-function smartScore(current, candidate) {
-
-    if (
-        !current ||
-        !candidate ||
-        !candidate.analyzed
-    ) {
-        return 0;
-    }
-
-
-    const bpmScore =
-        1 -
-        bpmDistance(
-            current.bpm,
-            candidate.bpm
-        );
-
-
-    const energyScore =
-        1 -
-        Math.abs(
-            current.energy -
-            candidate.energy
-        );
-
-
-    const rhythmScore =
-        1 -
-        Math.abs(
-            current.rhythm -
-            candidate.rhythm
-        );
-
-
-    const genreScore =
-        genreCompatibility(
-            current.genre,
-            candidate.genre
-        );
-
-
-    const camelotScore =
-        camelotCompatibility(
-            current.camelot,
-            candidate.camelot
-        );
-
-
-    let score =
-
-        bpmScore * .34 +
-
-        camelotScore * .20 +
-
-        energyScore * .18 +
-
-        rhythmScore * .16 +
-
-        genreScore * .12;
-
-
-    /*
-       Evitar repetir canciones recientes.
-    */
-
-    const historyIndex =
-        state.history.indexOf(
-            candidate.id
-        );
-
-
-    if (historyIndex >= 0) {
-
-        score -=
-            .30 /
-            (historyIndex + 1);
-    }
-
-
-    /*
-       Evitar el mismo tema.
-    */
-
-    if (
-        state.decks.A &&
-        state.decks.A.file === candidate.file
-    ) {
-        score = -1;
-    }
-
-    if (
-        state.decks.B &&
-        state.decks.B.file === candidate.file
-    ) {
-        score = -1;
-    }
-
-
-    /*
-       Pequeña variación para evitar
-       que siempre elija exactamente
-       el mismo tema.
-    */
-
-    score +=
-        Math.random() * .025;
-
-
-    return score;
-}
-
-
-/* =========================================================
-   CAMELOT
-========================================================= */
-
-function camelotCompatibility(a, b) {
-
-    if (!a || !b) {
-        return .5;
-    }
-
-
-    if (a === b) {
-        return 1;
-    }
-
-
-    const matchA =
-        a.match(/^(\d+)([AB])$/);
-
-    const matchB =
-        b.match(/^(\d+)([AB])$/);
-
-
-    if (!matchA || !matchB) {
-        return .5;
-    }
-
-
-    const numA =
-        Number(matchA[1]);
-
-    const numB =
-        Number(matchB[1]);
-
-
-    const letterA =
-        matchA[2];
-
-    const letterB =
-        matchB[2];
-
-
-    if (
-        numA === numB &&
-        letterA !== letterB
-    ) {
-        return .9;
-    }
-
-
-    if (
-        letterA === letterB &&
-        (
-            numB === numA + 1 ||
-            numB === numA - 1 ||
-            (numA === 1 && numB === 12) ||
-            (numA === 12 && numB === 1)
-        )
-    ) {
-        return .92;
-    }
-
-
-    return .25;
-}
-
-
-/* =========================================================
-   FIND SMART NEXT
-========================================================= */
-
-function findSmartNext() {
-
-    const active =
-        state.decks[state.activeDeck];
-
-
-    if (!active || !active.meta) {
-
-        /*
-           Si todavía no hay canción activa,
-           devuelve el primer tema analizado.
-        */
-
-        return state.library.find(
-            track => track.analyzed
-        ) || null;
-    }
-
-
-    const candidates =
-        state.library.filter(
-            track =>
-                track.analyzed &&
-                track.file !== active.file
-        );
-
-
-    if (!candidates.length) {
-        return null;
-    }
-
-
-    const ranked =
-        candidates
-            .map(track => ({
-
-                track,
-
-                score:
-                    smartScore(
-                        active.meta,
-                        track
-                    )
-
-            }))
-            .sort(
-                (a, b) =>
-                    b.score - a.score
-            );
-
-
-    return ranked[0] || null;
-}
-
-
-/* =========================================================
-   SMART NEXT
-   CARGA AUTOMÁTICAMENTE EL PLATO CONTRARIO
-========================================================= */
-
-async function smartNext() {
-
-    const active =
-        state.activeDeck;
-
-
-    const target =
-        active === "A"
-            ? "B"
-            : "A";
-
-
-    const current =
-        state.decks[active];
-
-
-    if (
-        state.decks[target].ready &&
-        !state.decks[target].audio.ended
-    ) {
-
-        $("smartReason").textContent =
-            `SMART NEXT: ${state.decks[target].meta?.name || "tema preparado"} ya está cargado en ${target}.`;
-
-        return;
-    }
-
-
-    const result =
-        findSmartNext();
-
-
-    if (!result) {
-
-        $("smartReason").textContent =
-            "SMART NEXT: no hay un tema analizado compatible.";
-
-        return;
-    }
-
-
-    await loadTrackSmart(
-        result.track,
-        target
+  const a =
+    Math.cos(
+      position * Math.PI / 2
     );
 
 
-    const currentMeta =
-        current.meta;
-
-
-    $("smartReason").textContent =
-
-        `SMART NEXT → DECK ${target}: ` +
-        `${result.track.name} · ` +
-        `${result.track.bpm} BPM · ` +
-        `${result.track.camelot}. ` +
-        `Selección compatible con ` +
-        `${currentMeta?.bpm || "--"} BPM / ` +
-        `${currentMeta?.camelot || "--"}.`;
-}
-
-
-/* =========================================================
-   LOAD TRACK
-========================================================= */
-
-async function loadTrackSmart(track, letter) {
-
-    if (!track || !track.file) {
-        return;
-    }
-
-
-    const deck =
-        state.decks[letter];
-
-
-    if (!deck) {
-        return;
-    }
-
-
-    if (deck.url) {
-
-        try {
-            URL.revokeObjectURL(
-                deck.url
-            );
-        } catch (_) {}
-    }
-
-
-    deck.audio.pause();
-
-    deck.audio.currentTime = 0;
-
-
-    deck.url =
-        URL.createObjectURL(
-            track.file
-        );
-
-
-    deck.file =
-        track.file;
-
-
-    deck.meta =
-        track;
-
-
-    deck.ready = true;
-
-    deck.isVideo =
-        isVideoFile(track.file);
-
-
-    deck.audio.src =
-        deck.url;
-
-
-    deck.audio.load();
-
-
-    updateDeckUI(letter);
-
-
-    if (
-        letter === state.activeDeck
-    ) {
-
-        updateVisualDeck(
-            letter
-        );
-    }
-}
-
-
-/* =========================================================
-   MANUAL FILE LOAD
-========================================================= */
-
-async function loadManualFile(
-    letter,
-    file
-) {
-
-    if (!isMediaFile(file)) {
-        return;
-    }
-
-
-    let track =
-        state.library.find(
-            item =>
-                item.id === fileId(file)
-        );
-
-
-    if (!track) {
-
-        track = {
-
-            id: fileId(file),
-
-            file,
-
-            name: file.name,
-
-            genre: detectGenre(file),
-
-            analyzed: false
-
-        };
-
-
-        state.library.push(track);
-    }
-
-
-    if (!track.analyzed) {
-
-        $("smartReason").textContent =
-            `Analizando ${file.name}...`;
-
-        const result =
-            await analyzeFile(file);
-
-
-        Object.assign(
-            track,
-            result,
-            {
-                analyzed: true
-            }
-        );
-    }
-
-
-    await loadTrackSmart(
-        track,
-        letter
+  const b =
+    Math.sin(
+      position * Math.PI / 2
     );
 
 
-    renderLibrary();
-}
+  const deckA =
+    state.decks.A;
+
+  const deckB =
+    state.decks.B;
 
 
-/* =========================================================
-   DECK UI
-========================================================= */
+  if (deckA.crossGain) {
 
-function updateDeckUI(letter) {
+    deckA.crossGain.gain.value =
+      a;
 
-    const deck =
-        state.decks[letter];
+  }
 
 
-    const meta =
-        deck.meta;
+  if (deckB.crossGain) {
+
+    deckB.crossGain.gain.value =
+      b;
+
+  }
 
 
-    if (!meta) {
-        return;
-    }
+  $("crossfader").value =
+    position;
 
 
-    $(`track${letter}`)
-        .textContent =
-        meta.name;
+  $("nextDeck").textContent =
+    position < .5 ? "B" : "A";
 
-
-    $(`bpm${letter}`)
-        .textContent =
-        `BPM ${meta.bpm || "--"}`;
-
-
-    $(`key${letter}`)
-        .textContent =
-        `KEY ${meta.key || "--"}`;
-
-
-    $(`camelot${letter}`)
-        .textContent =
-        meta.camelot || "--";
-
-
-    $(`energy${letter}`)
-        .textContent =
-        `ENERGY ${
-            meta.energy != null
-                ? Math.round(
-                    meta.energy * 100
-                ) + "%"
-                : "--"
-        }`;
-
-
-    $(`status${letter}`)
-        .textContent =
-        "LOADED";
 }
 
 
@@ -2059,92 +694,67 @@ function updateDeckUI(letter) {
 
 async function playDeck(letter) {
 
-    await startEngine();
+  await ensureAudio();
 
 
-    const deck =
-        state.decks[letter];
+  const deck =
+    state.decks[letter];
 
 
-    if (!deck.ready) {
+  if (!deck.file) {
 
-        alert(
-            `No hay canción cargada en Deck ${letter}.`
-        );
+    const track =
+      findSmartNext();
 
-        return;
+    if (!track) {
+
+      alert(
+        "Primero cargá música en la biblioteca."
+      );
+
+      return;
+
     }
 
+    await loadTrackSmart(
+      track,
+      letter
+    );
 
-    /*
-       Cuando el usuario inicia manualmente
-       un deck, ese deck pasa a ser activo.
-    */
-
-    if (
-        state.activeDeck !== letter &&
-        !state.transition
-    ) {
-
-        state.activeDeck =
-            letter;
-
-        setCrossPosition(
-            letter === "A"
-                ? 0
-                : 1
-        );
-
-        updateVisualDeck(letter);
-    }
+  }
 
 
-    try {
+  if (
+    letter !== state.activeDeck
+  ) {
 
-        await deck.audio.play();
+    const target =
+      letter === "A" ? 0 : 1;
 
-    } catch (error) {
+    updateCrossfader(target);
 
-        console.error(error);
+    state.activeDeck =
+      letter;
 
-        $("smartReason").textContent =
-            "El navegador bloqueó la reproducción. Presioná PLAY nuevamente.";
-    }
-
-
-    addHistory(deck);
-}
+  }
 
 
-/* =========================================================
-   HISTORY
-========================================================= */
+  try {
 
-function addHistory(deck) {
+    await deck.audio.play();
 
-    if (!deck || !deck.file) {
-        return;
-    }
+  } catch (error) {
 
+    console.error(error);
 
-    const id =
-        fileId(deck.file);
+    $("mediaStatus").textContent =
+      "Presioná PLAY nuevamente";
 
-
-    state.history =
-        state.history.filter(
-            value => value !== id
-        );
+  }
 
 
-    state.history.unshift(id);
+  updateActiveDeckUI();
 
-
-    state.history =
-        state.history.slice(
-            0,
-            CONFIG.recentLimit
-        );
 }
 
 
@@ -2154,750 +764,2605 @@ function addHistory(deck) {
 
 function stopDeck(letter) {
 
-    const deck =
-        state.decks[letter];
+  const deck =
+    state.decks[letter];
 
 
-    if (!deck) {
-        return;
-    }
+  deck.audio.pause();
+
+  deck.audio.currentTime = 0;
+
+  deck.playing = false;
 
 
-    deck.audio.pause();
+  updateDeckUI(letter);
 
-    deck.audio.currentTime = 0;
-
-
-    $(`status${letter}`)
-        .textContent =
-        deck.ready
-            ? "LOADED"
-            : "READY";
-
-
-    $(`deckPanel${letter}`)
-        .classList.remove("playing");
-}
-
-
-function stopAll() {
-
-    state.transitionToken++;
-
-    state.transition = false;
-
-    stopDeck("A");
-    stopDeck("B");
-
-
-    state.activeDeck = "A";
-
-    setCrossPosition(.5);
-
-    $("autoState")
-        .textContent =
-        "ESPERA";
-
-    updateVisualDeck("A");
 }
 
 
 /* =========================================================
-   CROSSFADER
+   FILES
 ========================================================= */
 
-function setCrossPosition(
-    value,
-    immediate = false
-) {
+function addFiles(files) {
 
-    value =
-        clamp(
-            Number(value),
-            0,
-            1
-        );
-
-
-    state.crossPosition =
-        value;
-
-
-    const aGain =
-        Math.cos(
-            value *
-            Math.PI /
-            2
-        );
-
-
-    const bGain =
-        Math.sin(
-            value *
-            Math.PI /
-            2
-        );
-
-
-    setDeckCrossGain(
-        "A",
-        aGain,
-        immediate
+  const valid =
+    files.filter(
+      file =>
+        file.type.startsWith("audio/") ||
+        file.type.startsWith("video/")
     );
 
 
-    setDeckCrossGain(
-        "B",
-        bGain,
-        immediate
-    );
+  valid.forEach(file => {
 
+    if (
+      state.library.some(
+        item =>
+          item.file.name === file.name &&
+          item.file.size === file.size
+      )
+    ) {
 
-    $("crossfader").value =
-        value;
+      return;
 
-
-    let label = "CENTER";
-
-
-    if (value <= .05) {
-        label = "A";
-    } else if (value >= .95) {
-        label = "B";
-    } else if (value < .45) {
-        label = "A → B";
-    } else if (value > .55) {
-        label = "A → B";
     }
 
 
-    $("crossPosition")
-        .textContent =
-        label;
-}
+    state.library.push({
+
+      id:
+        crypto.randomUUID
+          ? crypto.randomUUID()
+          : Date.now() + Math.random(),
+
+      file,
+
+      meta: {
+
+        title:
+          cleanTitle(file.name),
+
+        bpm: null,
+
+        key: null,
+
+        camelot: null,
+
+        energy: null,
+
+        confidence: 0,
+
+        beatInterval: null,
+
+        firstBeat: 0,
+
+        genre:
+          detectGenre(file.name),
+
+        phraseLength: 32
+
+      }
+
+    });
+
+  });
 
 
-function setDeckCrossGain(
-    letter,
-    value,
-    immediate = false
-) {
+  renderLibrary();
 
-    const deck =
-        state.decks[letter];
-
-
-    if (!deck || !state.ctx) {
-        return;
-    }
-
-
-    const param =
-        deck.crossGain.gain;
-
-
-    const now =
-        state.ctx.currentTime;
-
-
-    param.cancelScheduledValues(now);
-
-
-    if (immediate) {
-
-        param.setValueAtTime(
-            value,
-            now
-        );
-
-    } else {
-
-        param.setTargetAtTime(
-            value,
-            now,
-            .015
-        );
-    }
 }
 
 
 /* =========================================================
-   AUTO DJ TRANSITION
+   CLEAN TITLE
 ========================================================= */
 
-async function transitionTo(
-    targetLetter
-) {
+function cleanTitle(name) {
 
-    if (state.transition) {
-        return;
-    }
+  return name
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-
-    const target =
-        state.decks[targetLetter];
+}
 
 
-    const outgoingLetter =
-        targetLetter === "A"
-            ? "B"
-            : "A";
+/* =========================================================
+   GENRE
+========================================================= */
+
+function detectGenre(name) {
+
+  const n =
+    name.toLowerCase();
 
 
-    const outgoing =
-        state.decks[outgoingLetter];
+  if (/cumbia/.test(n))
+    return "cumbia";
+
+  if (/cuarteto/.test(n))
+    return "cuarteto";
+
+  if (/reggaeton|reguet[oó]n/.test(n))
+    return "reggaeton";
+
+  if (/rock/.test(n))
+    return "rock";
+
+  if (/pop/.test(n))
+    return "pop";
+
+  if (/electro|house|techno|edm/.test(n))
+    return "electronic";
+
+  if (/latin|latino/.test(n))
+    return "latin";
+
+  return "other";
+
+}
 
 
-    if (!target || !target.ready) {
+/* =========================================================
+   LIBRARY RENDER
+========================================================= */
 
-        await smartNext();
+function renderLibrary() {
 
-        return;
-    }
-
-
-    await startEngine();
-
-
-    state.transition = true;
-
-    const token =
-        ++state.transitionToken;
+  const container =
+    $("libraryList");
 
 
-    $("autoState")
-        .textContent =
-        `MEZCLANDO ${outgoingLetter} → ${targetLetter}`;
+  const search =
+    (
+      $("searchLibrary")?.value ||
+      ""
+    ).toLowerCase();
 
 
-    /*
-       El plato entrante SIEMPRE empieza
-       antes de bajar el plato saliente.
-    */
-
-    try {
-
-        if (target.audio.paused) {
-
-            await target.audio.play();
-        }
-
-    } catch (error) {
-
-        state.transition = false;
-
-        console.error(error);
-
-        return;
-    }
+  const genre =
+    $("genreFilter")?.value ||
+    "all";
 
 
-    addHistory(target);
+  const items =
+    state.library.filter(item => {
+
+      const title =
+        item.meta.title.toLowerCase();
 
 
-    /*
-       Partimos desde el crossfader real.
-       A = 0
-       B = 1
-    */
-
-    const start =
-        state.crossPosition;
+      const matchSearch =
+        title.includes(search);
 
 
-    const destination =
-        targetLetter === "A"
-            ? 0
-            : 1;
+      const matchGenre =
+        genre === "all" ||
+        item.meta.genre === genre;
 
 
-    const duration =
+      return matchSearch &&
+        matchGenre;
 
-        calculateAutoMixDuration(
-            outgoing,
-            target
-        );
-
-
-    const startTime =
-        performance.now();
-
-
-    await new Promise(resolve => {
-
-        function animate(now) {
-
-            if (
-                token !==
-                state.transitionToken
-            ) {
-
-                resolve();
-
-                return;
-            }
-
-
-            const elapsed =
-                now - startTime;
-
-
-            const raw =
-                clamp(
-                    elapsed /
-                    duration,
-                    0,
-                    1
-                );
-
-
-            /*
-               Smoothstep:
-               entrada y salida suaves.
-            */
-
-            const progress =
-                raw *
-                raw *
-                (3 - 2 * raw);
-
-
-            const position =
-                start +
-                (
-                    destination -
-                    start
-                ) *
-                progress;
-
-
-            setCrossPosition(
-                position
-            );
-
-
-            if (raw < 1) {
-
-                requestAnimationFrame(
-                    animate
-                );
-
-            } else {
-
-                resolve();
-            }
-        }
-
-
-        requestAnimationFrame(
-            animate
-        );
     });
 
 
+  if (!items.length) {
+
+    container.innerHTML = `
+      <div class="empty-library">
+        Cargá música para comenzar.
+      </div>
+    `;
+
+    return;
+
+  }
+
+
+  container.innerHTML =
+    items.map(
+      (item, index) => {
+
+        const m =
+          item.meta;
+
+
+        return `
+          <div class="library-item">
+
+            <div class="library-number">
+              ${index + 1}
+            </div>
+
+            <div>
+
+              <div class="library-title">
+                ${escapeHTML(m.title)}
+              </div>
+
+              <div class="library-meta">
+
+                ${m.bpm ? m.bpm + " BPM" : "-- BPM"}
+                ·
+                ${m.camelot || "--"}
+                ·
+                ${m.genre}
+
+              </div>
+
+            </div>
+
+            <button
+              class="library-load"
+              data-id="${item.id}">
+              CARGAR
+            </button>
+
+          </div>
+        `;
+
+      }
+    )
+    .join("");
+
+
+  container
+    .querySelectorAll(".library-load")
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        async () => {
+
+          await ensureAudio();
+
+          const item =
+            state.library.find(
+              x =>
+                String(x.id) ===
+                String(button.dataset.id)
+            );
+
+
+          if (!item) return;
+
+
+          const target =
+            state.activeDeck;
+
+
+          await loadTrackSmart(
+            item,
+            target
+          );
+
+        }
+      );
+
+    });
+
+}
+
+
+/* =========================================================
+   ESCAPE
+========================================================= */
+
+function escapeHTML(value) {
+
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+}
+
+
+/* =========================================================
+   ANALYZE LIBRARY
+========================================================= */
+
+async function analyzeLibrary() {
+
+  await ensureAudio();
+
+
+  if (!state.library.length) {
+
+    alert("No hay música cargada.");
+
+    return;
+
+  }
+
+
+  $("smartReason").textContent =
+    "Analizando...";
+
+
+  for (
+    let i = 0;
+    i < state.library.length;
+    i++
+  ) {
+
+    const item =
+      state.library[i];
+
+
     if (
-        token !==
-        state.transitionToken
+      item.meta.bpm &&
+      item.meta.key
     ) {
 
-        state.transition = false;
+      continue;
 
-        return;
     }
 
 
-    /*
-       Ahora el target es el plato activo.
-       IMPORTANTE:
-       no se pausa ni se reinicia el target.
-    */
-
-    state.activeDeck =
-        targetLetter;
+    $("smartReason").textContent =
+      `Analizando ${i + 1}/${state.library.length}`;
 
 
-    /*
-       El plato que salió recién se detiene
-       SOLO después de terminar el crossfade.
-    */
+    try {
 
-    outgoing.audio.pause();
+      await analyzeTrack(item);
 
-    outgoing.audio.currentTime = 0;
+    } catch (error) {
+
+      console.error(
+        "Error analizando:",
+        error
+      );
+
+    }
 
 
-    state.transition = false;
+    renderLibrary();
+
+    await new Promise(
+      resolve =>
+        setTimeout(resolve, 20)
+    );
+
+  }
 
 
-    updateVisualDeck(
-        targetLetter
+  $("smartReason").textContent =
+    "Biblioteca analizada";
+
+}
+
+
+/* =========================================================
+   ANALYZE TRACK
+========================================================= */
+
+async function analyzeTrack(item) {
+
+  const file =
+    item.file;
+
+
+  if (
+    file.type.startsWith("video/")
+  ) {
+
+    item.meta.bpm = 120;
+
+    item.meta.key = "C";
+
+    item.meta.camelot = "8B";
+
+    item.meta.energy = .6;
+
+    item.meta.confidence = .15;
+
+    item.meta.beatInterval =
+      60 / 120;
+
+    return;
+
+  }
+
+
+  const buffer =
+    await file.arrayBuffer();
+
+
+  const audioBuffer =
+    await state.ctx.decodeAudioData(
+      buffer.slice(0)
     );
 
 
-    $("autoState")
-        .textContent =
-        "SMART DJ ACTIVO";
+  const channel =
+    audioBuffer.getChannelData(0);
 
 
-    /*
-       Inmediatamente prepara el siguiente
-       tema en el plato que acaba de quedar libre.
-    */
-
-    if (state.autoDJ) {
-
-        setTimeout(
-            () => smartNext(),
-            250
-        );
-    }
-}
+  const sampleRate =
+    audioBuffer.sampleRate;
 
 
-/* =========================================================
-   AUTO MIX DURATION
-   No es una configuración del usuario.
-   El algoritmo la determina.
-========================================================= */
-
-function calculateAutoMixDuration(
-    outgoing,
-    incoming
-) {
-
-    const bpmA =
-        outgoing.meta?.bpm || 120;
-
-    const bpmB =
-        incoming.meta?.bpm || 120;
-
-
-    const average =
-        (
-            bpmA +
-            bpmB
-        ) / 2;
-
-
-    /*
-       Frase aproximada:
-       8 beats / 16 beats según BPM.
-    */
-
-    const beat =
-        60 /
-        Math.max(
-            average,
-            1
-        );
-
-
-    let duration =
-        beat * 8;
-
-
-    duration =
-        clamp(
-            duration * 1000,
-            3500,
-            10000
-        );
-
-
-    return duration;
-}
-
-
-/* =========================================================
-   AUTO DJ LOOP
-========================================================= */
-
-let autoDJInterval = null;
-
-
-function startAutoDJLoop() {
-
-    clearInterval(
-        autoDJInterval
+  const analysis =
+    createAnalysisBuffer(
+      channel,
+      sampleRate
     );
 
 
-    autoDJInterval =
-        setInterval(
-            autoDJTick,
-            1000
-        );
-}
+  const bpmData =
+    detectBPM(
+      analysis.data,
+      analysis.sampleRate
+    );
 
 
-async function autoDJTick() {
-
-    if (!state.autoDJ) {
-        return;
-    }
+  item.meta.bpm =
+    bpmData.bpm;
 
 
-    if (state.transition) {
-        return;
-    }
+  item.meta.confidence =
+    bpmData.confidence;
 
 
-    const active =
-        state.decks[state.activeDeck];
+  item.meta.beatInterval =
+    60 / bpmData.bpm;
 
 
-    if (!active || !active.ready) {
-
-        return;
-    }
+  item.meta.firstBeat =
+    bpmData.firstBeat;
 
 
-    /*
-       Si el plato activo está detenido,
-       iniciar reproducción.
-    */
-
-    if (
-        active.audio.paused &&
-        active.audio.currentTime === 0
-    ) {
-
-        try {
-
-            await active.audio.play();
-
-        } catch (_) {}
-
-        return;
-    }
+  item.meta.energy =
+    calculateEnergy(
+      analysis.data
+    );
 
 
-    /*
-       Smart Next:
-       si no hay canción en el plato contrario,
-       la carga automáticamente.
-    */
-
-    const nextLetter =
-        state.activeDeck === "A"
-            ? "B"
-            : "A";
+  const keyData =
+    estimateKey(
+      analysis.data,
+      analysis.sampleRate
+    );
 
 
-    const next =
-        state.decks[nextLetter];
+  item.meta.key =
+    keyData.key;
 
 
-    if (
-        !next.ready ||
-        next.audio.ended
-    ) {
-
-        await smartNext();
-
-        return;
-    }
+  item.meta.camelot =
+    keyData.camelot;
 
 
-    /*
-       No hacer crossfade si el tema activo
-       todavía está lejos del final.
-
-       Se toma como referencia la frase
-       y el tiempo restante.
-    */
-
-    if (!Number.isFinite(
-        active.audio.duration
-    )) {
-
-        return;
-    }
+  item.meta.phraseLength =
+    detectPhraseLength(
+      analysis.data,
+      analysis.sampleRate,
+      bpmData.bpm
+    );
 
 
-    const remaining =
-        active.audio.duration -
-        active.audio.currentTime;
+  return item.meta;
 
-
-    const mixWindow =
-        calculateAutoMixDuration(
-            active,
-            next
-        ) / 1000;
-
-
-    /*
-       Ventana de entrada.
-    */
-
-    if (
-        remaining <=
-        mixWindow +
-        1
-    ) {
-
-        await transitionTo(
-            nextLetter
-        );
-    }
 }
 
 
 /* =========================================================
-   DECK ENDED
+   ANALYSIS BUFFER
 ========================================================= */
 
-async function handleDeckEnded(
-    letter
+function createAnalysisBuffer(
+  channel,
+  sampleRate
 ) {
 
-    if (
-        state.transition
+  const targetRate = 11025;
+
+  const step =
+    Math.max(
+      1,
+      Math.floor(
+        sampleRate / targetRate
+      )
+    );
+
+
+  const length =
+    Math.floor(
+      channel.length / step
+    );
+
+
+  const data =
+    new Float32Array(length);
+
+
+  for (
+    let i = 0;
+    i < length;
+    i++
+  ) {
+
+    data[i] =
+      channel[i * step];
+
+  }
+
+
+  return {
+
+    data,
+
+    sampleRate:
+      sampleRate / step
+
+  };
+
+}
+
+
+/* =========================================================
+   BPM
+========================================================= */
+
+function detectBPM(
+  data,
+  sampleRate
+) {
+
+  const maxSeconds =
+    Math.min(
+      data.length / sampleRate,
+      90
+    );
+
+
+  const usableLength =
+    Math.floor(
+      maxSeconds * sampleRate
+    );
+
+
+  const envelopeRate =
+    100;
+
+
+  const hop =
+    Math.max(
+      1,
+      Math.floor(
+        sampleRate / envelopeRate
+      )
+    );
+
+
+  const envelope = [];
+
+
+  for (
+    let i = 0;
+    i < usableLength;
+    i += hop
+  ) {
+
+    let sum = 0;
+
+    const end =
+      Math.min(
+        i + hop,
+        usableLength
+      );
+
+
+    for (
+      let j = i;
+      j < end;
+      j++
     ) {
-        return;
+
+      sum +=
+        Math.abs(data[j]);
+
     }
 
 
-    if (!state.autoDJ) {
+    envelope.push(
+      sum / Math.max(1, end - i)
+    );
 
-        $(`status${letter}`)
-            .textContent =
-            "ENDED";
+  }
 
-        return;
+
+  const smooth =
+    smoothArray(envelope, 3);
+
+
+  const onset =
+    new Float32Array(
+      smooth.length
+    );
+
+
+  for (
+    let i = 1;
+    i < smooth.length;
+    i++
+  ) {
+
+    onset[i] =
+      Math.max(
+        0,
+        smooth[i] - smooth[i - 1]
+      );
+
+  }
+
+
+  const minBPM = 70;
+  const maxBPM = 180;
+
+
+  let bestBPM = 120;
+  let bestScore = -Infinity;
+
+
+  for (
+    let bpm = minBPM;
+    bpm <= maxBPM;
+    bpm += .5
+  ) {
+
+    const period =
+      envelopeRate *
+      60 /
+      bpm;
+
+
+    let score = 0;
+
+
+    for (
+      let i = 0;
+      i < onset.length;
+      i += period
+    ) {
+
+      const idx =
+        Math.round(i);
+
+
+      if (
+        idx >= 0 &&
+        idx < onset.length
+      ) {
+
+        score +=
+          onset[idx];
+
+      }
+
     }
 
 
-    /*
-       Si terminó el plato activo,
-       usamos el plato contrario.
-    */
-
     if (
-        letter ===
-        state.activeDeck
+      score > bestScore
     ) {
 
-        const nextLetter =
-            letter === "A"
-                ? "B"
-                : "A";
+      bestScore = score;
+
+      bestBPM = bpm;
+
+    }
+
+  }
 
 
-        const next =
-            state.decks[nextLetter];
+  const half =
+    bestBPM / 2;
 
 
-        if (!next.ready) {
+  const double =
+    bestBPM * 2;
 
-            await smartNext();
+
+  if (
+    half >= 70 &&
+    half <= 180
+  ) {
+
+    if (
+      autocorrelationBPM(
+        onset,
+        envelopeRate,
+        half
+      ) >
+      autocorrelationBPM(
+        onset,
+        envelopeRate,
+        bestBPM
+      )
+    ) {
+
+      bestBPM = half;
+
+    }
+
+  }
+
+
+  if (
+    double >= 70 &&
+    double <= 180
+  ) {
+
+    if (
+      autocorrelationBPM(
+        onset,
+        envelopeRate,
+        double
+      ) >
+      autocorrelationBPM(
+        onset,
+        envelopeRate,
+        bestBPM
+      )
+    ) {
+
+      bestBPM = double;
+
+    }
+
+  }
+
+
+  const confidence =
+    clamp(
+      Math.abs(bestScore) /
+      Math.max(
+        .0001,
+        onset.length * .01
+      ),
+      0,
+      1
+    );
+
+
+  let firstBeat = 0;
+
+
+  let maximum = 0;
+
+
+  for (
+    let i = 0;
+    i < Math.min(3000, onset.length);
+    i++
+  ) {
+
+    if (
+      onset[i] > maximum
+    ) {
+
+      maximum =
+        onset[i];
+
+      firstBeat =
+        i / envelopeRate;
+
+    }
+
+  }
+
+
+  return {
+
+    bpm:
+      Math.round(
+        bestBPM * 10
+      ) / 10,
+
+    confidence,
+
+    firstBeat
+
+  };
+
+}
+
+
+/* =========================================================
+   AUTOCORRELATION BPM
+========================================================= */
+
+function autocorrelationBPM(
+  onset,
+  rate,
+  bpm
+) {
+
+  const period =
+    rate * 60 / bpm;
+
+
+  let score = 0;
+
+
+  for (
+    let i = 0;
+    i < onset.length - period;
+    i += Math.max(1, period)
+  ) {
+
+    score +=
+      onset[
+        Math.round(i)
+      ] *
+      onset[
+        Math.round(i + period)
+      ];
+
+  }
+
+
+  return score;
+
+}
+
+
+/* =========================================================
+   ENERGY
+========================================================= */
+
+function calculateEnergy(data) {
+
+  const length =
+    Math.min(
+      data.length,
+      11025 * 60
+    );
+
+
+  let sum = 0;
+
+
+  for (
+    let i = 0;
+    i < length;
+    i++
+  ) {
+
+    sum +=
+      data[i] *
+      data[i];
+
+  }
+
+
+  const rms =
+    Math.sqrt(
+      sum / Math.max(1, length)
+    );
+
+
+  return clamp(
+    rms * 4,
+    0,
+    1
+  );
+
+}
+
+
+/* =========================================================
+   KEY
+========================================================= */
+
+function estimateKey(
+  data,
+  sampleRate
+) {
+
+  const names = [
+
+    ["C", "8B"],
+    ["C#", "3B"],
+    ["D", "10B"],
+    ["D#", "5B"],
+    ["E", "12B"],
+    ["F", "7B"],
+    ["F#", "2B"],
+    ["G", "9B"],
+    ["G#", "4B"],
+    ["A", "11B"],
+    ["A#", "6B"],
+    ["B", "1B"]
+
+  ];
+
+
+  const minorNames = [
+
+    ["A", "8A"],
+    ["A#", "3A"],
+    ["B", "10A"],
+    ["C", "5A"],
+    ["C#", "12A"],
+    ["D", "7A"],
+    ["D#", "2A"],
+    ["E", "9A"],
+    ["F", "4A"],
+    ["F#", "11A"],
+    ["G", "6A"],
+    ["G#", "1A"]
+
+  ];
+
+
+  const chroma =
+    new Float32Array(12);
+
+
+  const size =
+    4096;
+
+
+  const step =
+    Math.max(
+      size,
+      Math.floor(
+        data.length / 30
+      )
+    );
+
+
+  for (
+    let start = 0;
+    start + size < data.length;
+    start += step
+  ) {
+
+    const slice =
+      data.subarray(
+        start,
+        start + size
+      );
+
+
+    for (
+      let k = 0;
+      k < 12;
+      k++
+    ) {
+
+      const freq =
+        65.41 *
+        Math.pow(
+          2,
+          k / 12
+        );
+
+
+      let real = 0;
+      let imag = 0;
+
+
+      for (
+        let n = 0;
+        n < slice.length;
+        n += 8
+      ) {
+
+        const angle =
+          2 *
+          Math.PI *
+          freq *
+          n /
+          sampleRate;
+
+
+        real +=
+          slice[n] *
+          Math.cos(angle);
+
+        imag +=
+          slice[n] *
+          Math.sin(angle);
+
+      }
+
+
+      chroma[k] +=
+        Math.sqrt(
+          real * real +
+          imag * imag
+        );
+
+    }
+
+  }
+
+
+  let maxIndex = 0;
+
+
+  for (
+    let i = 1;
+    i < 12;
+    i++
+  ) {
+
+    if (
+      chroma[i] >
+      chroma[maxIndex]
+    ) {
+
+      maxIndex = i;
+
+    }
+
+  }
+
+
+  const major =
+    names[maxIndex];
+
+
+  const minor =
+    minorNames[
+      (maxIndex + 3) % 12
+    ];
+
+
+  const majorEnergy =
+    chroma[maxIndex];
+
+
+  const minorEnergy =
+    chroma[
+      (maxIndex + 3) % 12
+    ];
+
+
+  if (
+    minorEnergy > majorEnergy * .9
+  ) {
+
+    return {
+
+      key:
+        minor[0] + "m",
+
+      camelot:
+        minor[1]
+
+    };
+
+  }
+
+
+  return {
+
+    key:
+      major[0],
+
+    camelot:
+      major[1]
+
+  };
+
+}
+
+
+/* =========================================================
+   PHRASE
+========================================================= */
+
+function detectPhraseLength(
+  data,
+  sampleRate,
+  bpm
+) {
+
+  const seconds =
+    data.length /
+    sampleRate;
+
+
+  if (seconds < 60)
+    return 16;
+
+
+  return 32;
+
+}
+
+
+/* =========================================================
+   SMOOTH
+========================================================= */
+
+function smoothArray(
+  array,
+  radius
+) {
+
+  const result =
+    new Float32Array(
+      array.length
+    );
+
+
+  for (
+    let i = 0;
+    i < array.length;
+    i++
+  ) {
+
+    let sum = 0;
+
+    let count = 0;
+
+
+    for (
+      let j =
+        Math.max(0, i - radius);
+
+      j <=
+        Math.min(
+          array.length - 1,
+          i + radius
+        );
+
+      j++
+    ) {
+
+      sum += array[j];
+
+      count++;
+
+    }
+
+
+    result[i] =
+      sum / count;
+
+  }
+
+
+  return result;
+
+}
+
+
+/* =========================================================
+   LOAD TRACK
+========================================================= */
+
+async function loadTrackSmart(
+  item,
+  letter
+) {
+
+  if (!item) return false;
+
+
+  const deck =
+    state.decks[letter];
+
+
+  if (
+    deck.playing
+  ) {
+
+    return false;
+
+  }
+
+
+  await ensureAudio();
+
+
+  if (deck.url) {
+
+    URL.revokeObjectURL(
+      deck.url
+    );
+
+  }
+
+
+  deck.audio.pause();
+
+  deck.audio.removeAttribute("src");
+
+  deck.audio.load();
+
+
+  deck.file =
+    item.file;
+
+  deck.meta =
+    item.meta;
+
+  deck.url =
+    URL.createObjectURL(
+      item.file
+    );
+
+
+  deck.video =
+    item.file.type.startsWith(
+      "video/"
+    );
+
+
+  deck.ready = true;
+
+  deck.playing = false;
+
+  deck.preparedFor = null;
+
+
+  deck.audio.src =
+    deck.url;
+
+  deck.audio.load();
+
+
+  updateDeckUI(letter);
+
+
+  return true;
+
+}
+
+
+/* =========================================================
+   CLEAR DECK
+========================================================= */
+
+function clearDeck(letter) {
+
+  const deck =
+    state.decks[letter];
+
+
+  if (
+    deck.playing
+  ) {
+
+    deck.audio.pause();
+
+  }
+
+
+  if (deck.url) {
+
+    URL.revokeObjectURL(
+      deck.url
+    );
+
+  }
+
+
+  deck.audio.removeAttribute("src");
+
+  deck.audio.load();
+
+
+  deck.file = null;
+
+  deck.url = null;
+
+  deck.meta = null;
+
+  deck.ready = false;
+
+  deck.playing = false;
+
+  deck.preparedFor = null;
+
+  deck.video = false;
+
+
+  updateDeckUI(letter);
+
+}
+
+
+/* =========================================================
+   FIND SMART NEXT
+========================================================= */
+
+function findSmartNext() {
+
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  if (!state.library.length)
+    return null;
+
+
+  const current =
+    active.meta;
+
+
+  const blocked =
+    new Set(
+      state.history.slice(-6)
+    );
+
+
+  const candidates =
+    state.library.filter(
+      item => {
+
+        if (
+          active.file ===
+          item.file
+        ) {
+
+          return false;
+
         }
 
 
         if (
-            state.decks[nextLetter].ready
+          blocked.has(item.id)
         ) {
 
-            await transitionTo(
-                nextLetter
-            );
+          return false;
+
         }
+
+
+        if (
+          item.file ===
+          state.decks[
+            oppositeDeck(
+              state.activeDeck
+            )
+          ].file
+        ) {
+
+          return false;
+
+        }
+
+
+        return true;
+
+      }
+    );
+
+
+  if (!candidates.length) {
+
+    return state.library.find(
+      item =>
+        item.file !==
+        active.file
+    ) || null;
+
+  }
+
+
+  let best =
+    null;
+
+  let bestScore =
+    -Infinity;
+
+
+  candidates.forEach(
+    item => {
+
+      const score =
+        compatibilityScore(
+          current,
+          item.meta
+        );
+
+
+      if (
+        score >
+        bestScore
+      ) {
+
+        bestScore =
+          score;
+
+        best =
+          item;
+
+      }
+
     }
+  );
+
+
+  if (best) {
+
+    $("smartCompatibility")
+      .textContent =
+      Math.round(
+        bestScore * 100
+      ) + "%";
+
+  }
+
+
+  return best;
+
 }
 
 
 /* =========================================================
-   VISUAL DECK
+   COMPATIBILITY
 ========================================================= */
 
-function updateVisualDeck(
-    letter
+function compatibilityScore(
+  current,
+  next
 ) {
 
-    const deck =
-        state.decks[letter];
+  if (!next)
+    return 0;
 
 
-    if (!deck) {
-        return;
-    }
+  if (!current)
+    return .5;
 
 
-    $("activeDeckLabel")
-        .textContent =
-        letter;
+  let score = 0;
 
 
-    if (!deck.file) {
+  /* BPM */
 
-        $("visualMessage")
-            .textContent =
-            "CARGÁ TU BIBLIOTECA MUSICAL";
+  if (
+    current.bpm &&
+    next.bpm
+  ) {
 
-        return;
-    }
-
-
-    $("visualMessage")
-        .textContent = "";
-
-
-    $("visualTrack")
-        .textContent =
-        deck.meta?.name ||
-        deck.file.name;
+    const ratio =
+      Math.min(
+        current.bpm,
+        next.bpm
+      ) /
+      Math.max(
+        current.bpm,
+        next.bpm
+      );
 
 
-    $("mediaType")
-        .textContent =
-        deck.isVideo
-            ? "VIDEO PERFORMANCE"
-            : "AUDIO PERFORMANCE";
+    const bpmScore =
+      clamp(
+        (ratio - .7) / .3,
+        0,
+        1
+      );
 
 
-    const screen =
-        document.querySelector(
-            ".visual-screen"
-        );
+    score +=
+      bpmScore * .28;
+
+  } else {
+
+    score += .14;
+
+  }
 
 
-    if (deck.isVideo) {
+  /* CAMELOT */
 
-        screen.classList.add(
-            "video-mode"
-        );
+  if (
+    current.camelot &&
+    next.camelot
+  ) {
+
+    score +=
+      camelotCompatibility(
+        current.camelot,
+        next.camelot
+      ) * .25;
+
+  } else {
+
+    score += .125;
+
+  }
 
 
-        const video =
-            $("videoScreen");
+  /* ENERGY */
+
+  if (
+    current.energy != null &&
+    next.energy != null
+  ) {
+
+    score +=
+      (
+        1 -
+        Math.abs(
+          current.energy -
+          next.energy
+        )
+      ) * .17;
+
+  } else {
+
+    score += .08;
+
+  }
 
 
-        video.src =
-            deck.url;
+  /* GENRE */
 
+  if (
+    current.genre &&
+    next.genre
+  ) {
 
-        video.currentTime =
-            deck.audio.currentTime;
+    if (
+      current.genre ===
+      next.genre
+    ) {
 
-
-        video.play()
-            .catch(() => {});
-
+      score += .12;
 
     } else {
 
-        screen.classList.remove(
-            "video-mode"
+      score += .05;
+
+    }
+
+  }
+
+
+  /* RANDOM SMALL VARIATION */
+
+  score +=
+    Math.random() * .05;
+
+
+  return clamp(
+    score,
+    0,
+    1
+  );
+
+}
+
+
+/* =========================================================
+   CAMELOT
+========================================================= */
+
+function camelotCompatibility(
+  a,
+  b
+) {
+
+  if (a === b)
+    return 1;
+
+
+  const numberA =
+    parseInt(a);
+
+
+  const numberB =
+    parseInt(b);
+
+
+  if (
+    a.endsWith(
+      b.endsWith("A") ? "A" : "B"
+    )
+  ) {
+
+    if (
+      Math.abs(
+        numberA -
+        numberB
+      ) === 1
+    ) {
+
+      return .9;
+
+    }
+
+  }
+
+
+  if (
+    a.slice(-1) !==
+    b.slice(-1)
+  ) {
+
+    if (
+      numberA === numberB
+    ) {
+
+      return .82;
+
+    }
+
+  }
+
+
+  return .35;
+
+}
+
+
+/* =========================================================
+   SMART NEXT
+========================================================= */
+
+async function smartNext(
+  force = false
+) {
+
+  await ensureAudio();
+
+
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  const targetLetter =
+    oppositeDeck(
+      state.activeDeck
+    );
+
+
+  const target =
+    state.decks[
+      targetLetter
+    ];
+
+
+  if (
+    !active.file
+  ) {
+
+    const first =
+      state.library[0];
+
+
+    if (!first) {
+
+      $("smartReason").textContent =
+        "Sin música";
+
+      return false;
+
+    }
+
+
+    await loadTrackSmart(
+      first,
+      state.activeDeck
+    );
+
+
+    return true;
+
+  }
+
+
+  if (
+    target.file &&
+    target.preparedFor ===
+    active.file &&
+    !force
+  ) {
+
+    updateSmartStatus();
+
+    return true;
+
+  }
+
+
+  if (
+    target.playing
+  ) {
+
+    return false;
+
+  }
+
+
+  const next =
+    findSmartNext();
+
+
+  if (!next) {
+
+    $("smartReason").textContent =
+      "No hay siguiente canción";
+
+    return false;
+
+  }
+
+
+  const loaded =
+    await loadTrackSmart(
+      next,
+      targetLetter
+    );
+
+
+  if (loaded) {
+
+    target.preparedFor =
+      active.file;
+
+
+    $("smartReason").textContent =
+      `Siguiente: ${next.meta.title}`;
+
+    updateSmartStatus();
+
+  }
+
+
+  return loaded;
+
+}
+
+
+/* =========================================================
+   BPM SYNC
+========================================================= */
+
+function syncIncomingBPM(
+  outgoing,
+  incoming
+) {
+
+  if (
+    !outgoing.meta ||
+    !incoming.meta ||
+    !outgoing.meta.bpm ||
+    !incoming.meta.bpm
+  ) {
+
+    incoming.audio.playbackRate =
+      1;
+
+    return;
+
+  }
+
+
+  const ratio =
+    outgoing.meta.bpm /
+    incoming.meta.bpm;
+
+
+  const rate =
+    clamp(
+      ratio,
+      .92,
+      1.08
+    );
+
+
+  incoming.audio.playbackRate =
+    rate;
+
+
+  try {
+
+    incoming.audio.preservesPitch =
+      true;
+
+    incoming.audio.mozPreservesPitch =
+      true;
+
+    incoming.audio.webkitPreservesPitch =
+      true;
+
+  } catch (error) {}
+
+}
+
+
+/* =========================================================
+   TRANSITION LENGTH
+========================================================= */
+
+function calculateMixDuration(
+  outgoing
+) {
+
+  if (
+    !outgoing.meta ||
+    !outgoing.meta.bpm
+  ) {
+
+    return 10000;
+
+  }
+
+
+  const beats =
+    outgoing.meta.phraseLength ||
+    16;
+
+
+  return clamp(
+    beats *
+    60 /
+    outgoing.meta.bpm *
+    1000,
+    6000,
+    24000
+  );
+
+}
+
+
+/* =========================================================
+   TRANSITION
+========================================================= */
+
+async function transitionTo(
+  targetLetter
+) {
+
+  if (
+    state.transitionRunning
+  ) {
+
+    return;
+
+  }
+
+
+  const outgoingLetter =
+    state.activeDeck;
+
+
+  if (
+    targetLetter ===
+    outgoingLetter
+  ) {
+
+    return;
+
+  }
+
+
+  const outgoing =
+    state.decks[
+      outgoingLetter
+    ];
+
+
+  const incoming =
+    state.decks[
+      targetLetter
+    ];
+
+
+  if (
+    !outgoing.file
+  ) {
+
+    return;
+
+  }
+
+
+  if (
+    !incoming.file ||
+    incoming.preparedFor !==
+    outgoing.file
+  ) {
+
+    const ok =
+      await smartNext(true);
+
+
+    if (!ok) return;
+
+    if (
+      !incoming.file
+    ) return;
+
+  }
+
+
+  await ensureAudio();
+
+
+  state.transitionRunning =
+    true;
+
+
+  const token =
+    ++state.transitionToken;
+
+
+  syncIncomingBPM(
+    outgoing,
+    incoming
+  );
+
+
+  const incomingStart =
+    incoming.audio.currentTime;
+
+
+  try {
+
+    await incoming.audio.play();
+
+  } catch (error) {
+
+    console.error(error);
+
+    state.transitionRunning =
+      false;
+
+    return;
+
+  }
+
+
+  const startPosition =
+    state.crossPosition;
+
+
+  const endPosition =
+    targetLetter === "A"
+      ? 0
+      : 1;
+
+
+  const duration =
+    calculateMixDuration(
+      outgoing
+    );
+
+
+  const startTime =
+    performance.now();
+
+
+  $("autoState").textContent =
+    `MEZCLANDO ${outgoingLetter} → ${targetLetter}`;
+
+
+  $("mediaStatus").textContent =
+    `SMART MIX ${outgoingLetter} → ${targetLetter}`;
+
+
+  await new Promise(
+    resolve => {
+
+      function step(now) {
+
+        if (
+          token !==
+          state.transitionToken
+        ) {
+
+          resolve();
+
+          return;
+
+        }
+
+
+        const progress =
+          clamp(
+            (
+              now -
+              startTime
+            ) / duration,
+            0,
+            1
+          );
+
+
+        const eased =
+          progress *
+          progress *
+          (3 - 2 * progress);
+
+
+        const position =
+          startPosition +
+          (
+            endPosition -
+            startPosition
+          ) *
+          eased;
+
+
+        updateCrossfader(
+          position
         );
 
 
-        $("videoScreen")
-            .pause();
+        if (
+          progress >= 1
+        ) {
 
-        $("videoScreen")
-            .removeAttribute("src");
+          resolve();
+
+          return;
+
+        }
+
+
+        requestAnimationFrame(
+          step
+        );
+
+      }
+
+
+      requestAnimationFrame(
+        step
+      );
+
     }
+  );
+
+
+  if (
+    token !==
+    state.transitionToken
+  ) {
+
+    state.transitionRunning =
+      false;
+
+    return;
+
+  }
+
+
+  /* Guardamos la canción que terminó */
+
+  if (outgoing.file) {
+
+    const outgoingItem =
+      state.library.find(
+        item =>
+          item.file ===
+          outgoing.file
+      );
+
+
+    if (outgoingItem) {
+
+      state.history.push(
+        outgoingItem.id
+      );
+
+      if (
+        state.history.length >
+        30
+      ) {
+
+        state.history.shift();
+
+      }
+
+    }
+
+  }
+
+
+  /* El nuevo deck pasa a ser activo */
+
+  state.activeDeck =
+    targetLetter;
+
+
+  updateActiveDeckUI();
+
+
+  /* Reiniciamos y limpiamos el deck anterior */
+
+  outgoing.audio.pause();
+
+  outgoing.audio.currentTime =
+    0;
+
+
+  clearDeck(
+    outgoingLetter
+  );
+
+
+  /*
+     El deck anterior ahora está libre.
+     Cargamos inmediatamente la próxima
+     canción allí.
+  */
+
+  if (state.autoDJ) {
+
+    await smartNext(true);
+
+  }
+
+
+  state.transitionRunning =
+    false;
+
+
+  $("autoState").textContent =
+    "SMART AUTO DJ ACTIVO";
+
+
+  $("mediaStatus").textContent =
+    `EN VIVO • PLATO ${state.activeDeck}`;
+
+}
+
+
+/* =========================================================
+   AUTO DJ
+========================================================= */
+
+function toggleAutoDJ() {
+
+  state.autoDJ =
+    !state.autoDJ;
+
+
+  const button =
+    $("autoDJButton");
+
+
+  if (
+    state.autoDJ
+  ) {
+
+    button.textContent =
+      "■ SMART AUTO DJ: ON";
+
+    button.classList.add(
+      "active"
+    );
+
+
+    $("autoState").textContent =
+      "SMART AUTO DJ ACTIVO";
+
+
+    startAutoDJ();
+
+
+  } else {
+
+    button.textContent =
+      "▶ SMART AUTO DJ: OFF";
+
+    button.classList.remove(
+      "active"
+    );
+
+
+    $("autoState").textContent =
+      "SMART AUTO DJ DETENIDO";
+
+
+    stopAutoDJ();
+
+  }
+
+}
+
+
+/* =========================================================
+   AUTO DJ START
+========================================================= */
+
+async function startAutoDJ() {
+
+  await ensureAudio();
+
+
+  clearInterval(
+    state.autoTimer
+  );
+
+
+  await smartNext(true);
+
+
+  state.autoTimer =
+    setInterval(
+      autoDJTick,
+      700
+    );
+
+
+  await autoDJTick();
+
+}
+
+
+/* =========================================================
+   AUTO DJ STOP
+========================================================= */
+
+function stopAutoDJ() {
+
+  clearInterval(
+    state.autoTimer
+  );
+
+  state.autoTimer =
+    null;
+
+}
+
+
+/* =========================================================
+   AUTO DJ TICK
+========================================================= */
+
+async function autoDJTick() {
+
+  if (
+    !state.autoDJ ||
+    state.transitionRunning
+  ) {
+
+    return;
+
+  }
+
+
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  if (
+    !active.file
+  ) {
+
+    return;
+
+  }
+
+
+  if (
+    !active.playing
+  ) {
+
+    return;
+
+  }
+
+
+  const targetLetter =
+    oppositeDeck(
+      state.activeDeck
+    );
+
+
+  const target =
+    state.decks[
+      targetLetter
+    ];
+
+
+  if (
+    !target.file ||
+    target.preparedFor !==
+    active.file
+  ) {
+
+    await smartNext(true);
+
+  }
+
+
+  if (
+    !target.file
+  ) {
+
+    return;
+
+  }
+
+
+  const remaining =
+    active.audio.duration -
+    active.audio.currentTime;
+
+
+  const mixSeconds =
+    calculateMixDuration(
+      active
+    ) / 1000;
+
+
+  /*
+     La transición se dispara
+     automáticamente antes del final.
+  */
+
+  if (
+    remaining <=
+    Math.max(
+      mixSeconds,
+      8
+    )
+  ) {
+
+    await transitionTo(
+      targetLetter
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   UPDATE SMART STATUS
+========================================================= */
+
+function updateSmartStatus() {
+
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  if (!active.meta) {
+
+    return;
+
+  }
+
+
+  $("smartBpm").textContent =
+    active.meta.bpm || "--";
+
+
+  $("smartKey").textContent =
+    active.meta.key || "--";
+
+
+  $("smartCamelot").textContent =
+    active.meta.camelot || "--";
+
+
+  $("smartEnergy").textContent =
+    active.meta.energy != null
+      ? Math.round(
+          active.meta.energy * 100
+        )
+      : "--";
+
+
+  $("nextDeck").textContent =
+    oppositeDeck(
+      state.activeDeck
+    );
+
+}
+
+
+/* =========================================================
+   UI DECK
+========================================================= */
+
+function updateDeckUI(letter) {
+
+  const deck =
+    state.decks[letter];
+
+
+  const status =
+    $("status" + letter);
+
+
+  if (!deck.file) {
+
+    status.textContent =
+      "VACÍO";
+
+    $("track" + letter)
+      .textContent =
+      "Sin canción";
+
+    $("bpm" + letter)
+      .textContent =
+      "--";
+
+    $("key" + letter)
+      .textContent =
+      "--";
+
+    $("camelot" + letter)
+      .textContent =
+      "--";
+
+    $("energy" + letter)
+      .textContent =
+      "--";
+
+    $("platter" + letter)
+      .classList.remove(
+        "playing"
+      );
+
+    return;
+
+  }
+
+
+  const m =
+    deck.meta;
+
+
+  $("track" + letter)
+    .textContent =
+    m.title;
+
+
+  $("bpm" + letter)
+    .textContent =
+    m.bpm || "--";
+
+
+  $("key" + letter)
+    .textContent =
+    m.key || "--";
+
+
+  $("camelot" + letter)
+    .textContent =
+    m.camelot || "--";
+
+
+  $("energy" + letter)
+    .textContent =
+    m.energy != null
+      ? Math.round(
+          m.energy * 100
+        )
+      : "--";
+
+
+  status.textContent =
+    deck.playing
+      ? "REPRODUCIENDO"
+      : "PREPARADO";
+
+
+  $("platter" + letter)
+    .classList.toggle(
+      "playing",
+      deck.playing
+    );
+
+}
+
+
+/* =========================================================
+   ACTIVE DECK
+========================================================= */
+
+function updateActiveDeckUI() {
+
+  ["A", "B"].forEach(
+    letter => {
+
+      $("deckPanel" + letter)
+        .classList.toggle(
+          "active",
+          letter ===
+          state.activeDeck
+        );
+
+    }
+  );
+
+
+  $("channelLightA")
+    .classList.toggle(
+      "active-a",
+      state.activeDeck === "A"
+    );
+
+
+  $("channelLightB")
+    .classList.toggle(
+      "active-b",
+      state.activeDeck === "B"
+    );
+
+
+  updateSmartStatus();
+
+
+  updateVideo();
+
+}
+
+
+/* =========================================================
+   VIDEO
+========================================================= */
+
+function updateVideo() {
+
+  const screen =
+    $("videoScreen");
+
+
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  if (
+    !active ||
+    !active.video ||
+    !active.url
+  ) {
+
+    screen.pause();
+
+    screen.removeAttribute(
+      "src"
+    );
+
+    screen.style.display =
+      "none";
+
+    return;
+
+  }
+
+
+  screen.src =
+    active.url;
+
+  screen.style.display =
+    "block";
+
+
+  screen.play()
+    .catch(
+      () => {}
+    );
+
+
+  syncVideo();
+
 }
 
 
@@ -2907,53 +3372,46 @@ function updateVisualDeck(
 
 function syncVideo() {
 
-    const deck =
-        state.decks[state.activeDeck];
+  const screen =
+    $("videoScreen");
 
 
-    const video =
-        $("videoScreen");
+  const active =
+    state.decks[
+      state.activeDeck
+    ];
+
+
+  if (
+    !active ||
+    !active.video
+  ) {
+
+    return;
+
+  }
+
+
+  try {
+
+    const difference =
+      Math.abs(
+        screen.currentTime -
+        active.audio.currentTime
+      );
 
 
     if (
-        deck &&
-        deck.isVideo &&
-        deck.audio &&
-        video.src
+      difference > .15
     ) {
 
-        const difference =
-            Math.abs(
-                video.currentTime -
-                deck.audio.currentTime
-            );
+      screen.currentTime =
+        active.audio.currentTime;
 
-
-        if (difference > .25) {
-
-            try {
-
-                video.currentTime =
-                    deck.audio.currentTime;
-
-            } catch (_) {}
-        }
-
-
-        if (
-            !deck.audio.paused &&
-            video.paused
-        ) {
-
-            video.play()
-                .catch(() => {});
-        }
     }
 
+  } catch (error) {}
 
-    requestAnimationFrame(
-        syncVideo
-    );
 }
 
 
@@ -2963,1105 +3421,225 @@ function syncVideo() {
 
 function startVisualizer() {
 
-    const canvas =
-        $("visualizer");
+  const canvas =
+    $("visualizer");
 
 
-    const ctx =
-        canvas.getContext("2d");
-
-
-    function resize() {
-
-        canvas.width =
-            canvas.clientWidth *
-            devicePixelRatio;
-
-        canvas.height =
-            canvas.clientHeight *
-            devicePixelRatio;
-
-        ctx.scale(
-            devicePixelRatio,
-            devicePixelRatio
-        );
-    }
-
-
-    resize();
-
-    window.addEventListener(
-        "resize",
-        resize
+  const ctx =
+    canvas.getContext(
+      "2d"
     );
 
 
-    const data =
-        new Uint8Array(
-            state.analyser.frequencyBinCount
+  function resize() {
+
+    canvas.width =
+      canvas.clientWidth *
+      devicePixelRatio;
+
+    canvas.height =
+      canvas.clientHeight *
+      devicePixelRatio;
+
+  }
+
+
+  resize();
+
+
+  window.addEventListener(
+    "resize",
+    resize
+  );
+
+
+  const data =
+    new Uint8Array(
+      state.analyser.frequencyBinCount
+    );
+
+
+  function draw() {
+
+    state.animationFrame =
+      requestAnimationFrame(
+        draw
+      );
+
+
+    state.analyser
+      .getByteFrequencyData(
+        data
+      );
+
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+
+    const width =
+      canvas.width;
+
+    const height =
+      canvas.height;
+
+
+    const bars =
+      100;
+
+
+    const step =
+      Math.floor(
+        data.length /
+        bars
+      );
+
+
+    const barWidth =
+      width /
+      bars;
+
+
+    for (
+      let i = 0;
+      i < bars;
+      i++
+    ) {
+
+      const value =
+        data[i * step] /
+        255;
+
+
+      const barHeight =
+        value *
+        height *
+        .45;
+
+
+      const x =
+        i *
+        barWidth;
+
+
+      const y =
+        height -
+        barHeight;
+
+
+      const gradient =
+        ctx.createLinearGradient(
+          0,
+          y,
+          0,
+          height
         );
 
 
-    function draw() {
+      gradient.addColorStop(
+        0,
+        "#00eaff"
+      );
 
-        requestAnimationFrame(draw);
+      gradient.addColorStop(
+        .5,
+        "#9c4dff"
+      );
 
-
-        const width =
-            canvas.clientWidth;
-
-        const height =
-            canvas.clientHeight;
-
-
-        state.analyser.getByteFrequencyData(
-            data
-        );
-
-
-        ctx.clearRect(
-            0,
-            0,
-            width,
-            height
-        );
+      gradient.addColorStop(
+        1,
+        "#ff244f"
+      );
 
 
-        const bars = 100;
-
-        const step =
-            Math.floor(
-                data.length /
-                bars
-            );
+      ctx.fillStyle =
+        gradient;
 
 
-        const barWidth =
-            width / bars;
+      ctx.fillRect(
+        x,
+        y,
+        Math.max(
+          1,
+          barWidth - 2
+        ),
+        barHeight
+      );
 
-
-        for (
-            let i = 0;
-            i < bars;
-            i++
-        ) {
-
-            const value =
-                data[i * step] / 255;
-
-
-            const barHeight =
-                value *
-                height *
-                .55;
-
-
-            const x =
-                i *
-                barWidth;
-
-
-            const y =
-                height -
-                barHeight;
-
-
-            const gradient =
-                ctx.createLinearGradient(
-                    0,
-                    height,
-                    0,
-                    y
-                );
-
-
-            gradient.addColorStop(
-                0,
-                "#00f6ff"
-            );
-
-            gradient.addColorStop(
-                .5,
-                "#a855f7"
-            );
-
-            gradient.addColorStop(
-                1,
-                "#ff2bd6"
-            );
-
-
-            ctx.fillStyle =
-                gradient;
-
-
-            ctx.fillRect(
-                x + 1,
-                y,
-                Math.max(
-                    barWidth - 2,
-                    1
-                ),
-                barHeight
-            );
-        }
     }
 
-
-    draw();
 
     syncVideo();
+
+  }
+
+
+  draw();
+
 }
 
 
 /* =========================================================
-   METERS
+   FULLSCREEN
 ========================================================= */
 
-function startMeters() {
+async function toggleFullscreen() {
 
-    const data =
-        new Uint8Array(
-            state.analyser.frequencyBinCount
-        );
-
-
-    function meterLoop() {
-
-        requestAnimationFrame(
-            meterLoop
-        );
-
-
-        state.analyser.getByteFrequencyData(
-            data
-        );
-
-
-        let sum = 0;
-
-
-        for (const value of data) {
-            sum += value;
-        }
-
-
-        const level =
-            data.length
-                ? sum /
-                  data.length /
-                  255
-                : 0;
-
-
-        const active =
-            state.activeDeck;
-
-
-        const a =
-            active === "A"
-                ? level
-                : level *
-                  state.decks.B?.crossGain.gain.value ||
-                  0;
-
-
-        const b =
-            active === "B"
-                ? level
-                : level *
-                  state.decks.A?.crossGain.gain.value ||
-                  0;
-
-
-        $("meterA").style.width =
-            `${clamp(a * 100, 0, 100)}%`;
-
-        $("meterB").style.width =
-            `${clamp(b * 100, 0, 100)}%`;
-
-        $("meterAText").textContent =
-            `${Math.round(
-                clamp(a * 100, 0, 100)
-            )}%`;
-
-        $("meterBText").textContent =
-            `${Math.round(
-                clamp(b * 100, 0, 100)
-            )}%`;
-    }
-
-
-    meterLoop();
-}
-
-
-/* =========================================================
-   VOICE ID
-========================================================= */
-
-function loadVoiceFiles(files) {
-
-    state.voiceFiles =
-        Array.from(files)
-            .filter(
-                file =>
-                    file.type.startsWith(
-                        "audio/"
-                    )
-            );
-
-
-    renderVoiceList();
-
-    startVoiceTimer();
-}
-
-
-function renderVoiceList() {
-
-    const container =
-        $("voiceList");
-
-
-    if (!state.voiceFiles.length) {
-
-        container.textContent =
-            "No hay Voice ID cargados.";
-
-        return;
-    }
-
-
-    container.innerHTML =
-        state.voiceFiles
-            .map(
-                file =>
-                    `• ${escapeHtml(
-                        file.name
-                    )}`
-            )
-            .join("<br>");
-}
-
-
-function startVoiceTimer() {
-
-    clearInterval(
-        state.voiceTimer
-    );
-
-
-    if (!state.started) {
-        return;
-    }
-
-
-    state.voiceTimer =
-        setInterval(
-            () => {
-
-                if (
-                    state.voiceEnabled
-                ) {
-
-                    playVoiceID();
-                }
-
-            },
-            60 * 1000
-        );
-}
-
-
-async function playVoiceID() {
+  try {
 
     if (
-        state.voiceBusy ||
-        !state.voiceFiles.length
-    ) {
-        return;
-    }
-
-
-    await startEngine();
-
-
-    const file =
-        state.voiceFiles[
-            Math.floor(
-                Math.random() *
-                state.voiceFiles.length
-            )
-        ];
-
-
-    const audio =
-        $("voiceAudio");
-
-
-    state.voiceBusy = true;
-
-
-    const url =
-        URL.createObjectURL(
-            file
-        );
-
-
-    audio.src = url;
-
-    audio.volume = .9;
-
-
-    /*
-       Ducking profesional:
-       baja solamente la música.
-       El Voice ID permanece audible.
-    */
-
-    const now =
-        state.ctx.currentTime;
-
-
-    state.musicBus.gain.cancelScheduledValues(
-        now
-    );
-
-    state.musicBus.gain.setTargetAtTime(
-        .35,
-        now,
-        .04
-    );
-
-
-    $("voiceStatus")
-        .textContent =
-        "ON AIR";
-
-
-    try {
-
-        await audio.play();
-
-    } catch (error) {
-
-        console.error(error);
-
-        restoreMusicAfterVoice();
-
-        state.voiceBusy = false;
-
-        URL.revokeObjectURL(url);
-    }
-
-
-    audio.onended =
-        () => {
-
-            restoreMusicAfterVoice();
-
-            state.voiceBusy = false;
-
-            URL.revokeObjectURL(url);
-
-            $("voiceStatus")
-                .textContent =
-                state.voiceEnabled
-                    ? "AUTO"
-                    : "OFF";
-        };
-}
-
-
-function restoreMusicAfterVoice() {
-
-    if (!state.ctx) {
-        return;
-    }
-
-
-    const now =
-        state.ctx.currentTime;
-
-
-    state.musicBus.gain.cancelScheduledValues(
-        now
-    );
-
-
-    state.musicBus.gain.setTargetAtTime(
-        1,
-        now,
-        .12
-    );
-}
-
-
-/* =========================================================
-   RECORD
-========================================================= */
-
-function toggleRecording() {
-
-    if (!state.started) {
-        return;
-    }
-
-
-    if (state.recording) {
-
-        state.recorder.stop();
-
-        return;
-    }
-
-
-    const stream =
-        state.recordDestination.stream;
-
-
-    let mime =
-        "audio/webm;codecs=opus";
-
-
-    if (
-        !MediaRecorder.isTypeSupported(
-            mime
-        )
+      !document.fullscreenElement
     ) {
 
-        mime =
-            "audio/webm";
-    }
-
-
-    state.recordChunks = [];
-
-
-    state.recorder =
-        new MediaRecorder(
-            stream,
-            {
-                mimeType: mime
-            }
-        );
-
-
-    state.recorder.ondataavailable =
-        event => {
-
-            if (
-                event.data &&
-                event.data.size
-            ) {
-
-                state.recordChunks.push(
-                    event.data
-                );
-            }
-        };
-
-
-    state.recorder.onstop =
-        () => {
-
-            const blob =
-                new Blob(
-                    state.recordChunks,
-                    {
-                        type: mime
-                    }
-                );
-
-
-            const url =
-                URL.createObjectURL(
-                    blob
-                );
-
-
-            const a =
-                document.createElement("a");
-
-
-            a.href = url;
-
-            a.download =
-                `HC-PRO-DJ-${Date.now()}.webm`;
-
-            a.click();
-
-
-            setTimeout(
-                () =>
-                    URL.revokeObjectURL(
-                        url
-                    ),
-                2000
-            );
-
-
-            state.recording = false;
-
-
-            $("recordButton")
-                .classList.remove(
-                    "recording"
-                );
-
-            $("recordButton")
-                .textContent =
-                "● REC";
-        };
-
-
-    state.recorder.start();
-
-    state.recording = true;
-
-
-    $("recordButton")
-        .classList.add(
-            "recording"
-        );
-
-    $("recordButton")
-        .textContent =
-        "■ GRABANDO";
-}
-
-
-/* =========================================================
-   CLOCK
-========================================================= */
-
-function startClock() {
-
-    function update() {
-
-        const now =
-            new Date();
-
-
-        $("clock")
-            .textContent =
-            now.toLocaleTimeString(
-                "es-AR",
-                {
-                    hour12: false
-                }
-            );
-    }
-
-
-    update();
-
-    setInterval(
-        update,
-        1000
-    );
-}
-
-
-/* =========================================================
-   CONTROLS
-========================================================= */
-
-function setupControls() {
-
-    $("startEngine")
-        .addEventListener(
-            "click",
-            startEngine
-        );
-
-
-    $("loadA")
-        .addEventListener(
-            "click",
-            () =>
-                $("fileA").click()
-        );
-
-
-    $("loadB")
-        .addEventListener(
-            "click",
-            () =>
-                $("fileB").click()
-        );
-
-
-    $("fileA")
-        .addEventListener(
-            "change",
-            event => {
-
-                const file =
-                    event.target.files[0];
-
-                if (file) {
-
-                    loadManualFile(
-                        "A",
-                        file
-                    );
-                }
-            }
-        );
-
-
-    $("fileB")
-        .addEventListener(
-            "change",
-            event => {
-
-                const file =
-                    event.target.files[0];
-
-                if (file) {
-
-                    loadManualFile(
-                        "B",
-                        file
-                    );
-                }
-            }
-        );
-
-
-    $("playA")
-        .addEventListener(
-            "click",
-            () =>
-                playDeck("A")
-        );
-
-
-    $("playB")
-        .addEventListener(
-            "click",
-            () =>
-                playDeck("B")
-        );
-
-
-    $("stopA")
-        .addEventListener(
-            "click",
-            () =>
-                stopDeck("A")
-        );
-
-
-    $("stopB")
-        .addEventListener(
-            "click",
-            () =>
-                stopDeck("B")
-        );
-
-
-    $("stopAll")
-        .addEventListener(
-            "click",
-            stopAll
-        );
-
-
-    $("crossfader")
-        .addEventListener(
-            "input",
-            event => {
-
-                /*
-                   Si el usuario mueve el
-                   crossfader durante Auto DJ,
-                   no se reinicia ninguna canción.
-                */
-
-                if (state.transition) {
-
-                    state.transitionToken++;
-
-                    state.transition =
-                        false;
-
-                    $("autoState")
-                        .textContent =
-                        "CONTROL MANUAL";
-                }
-
-
-                setCrossPosition(
-                    event.target.value
-                );
-            }
-        );
-
-
-    $("master")
-        .addEventListener(
-            "input",
-            event => {
-
-                if (!state.masterGain) {
-                    return;
-                }
-
-                state.masterGain.gain.value =
-                    event.target.value;
-
-                $("masterValue")
-                    .textContent =
-                    `${Math.round(
-                        event.target.value * 100
-                    )}%`;
-            }
-        );
-
-
-    ["A", "B"].forEach(
-        letter => {
-
-            $(`volume${letter}`)
-                .addEventListener(
-                    "input",
-                    event => {
-
-                        const deck =
-                            state.decks[letter];
-
-                        if (!deck) {
-                            return;
-                        }
-
-
-                        deck.volumeGain.gain.value =
-                            event.target.value;
-
-
-                        $(
-                            `volumeValue${letter}`
-                        )
-                            .textContent =
-                            `${Math.round(
-                                event.target.value * 100
-                            )}%`;
-                    }
-                );
-
-
-            $(`pitch${letter}`)
-                .addEventListener(
-                    "input",
-                    event => {
-
-                        const deck =
-                            state.decks[letter];
-
-                        if (!deck) {
-                            return;
-                        }
-
-
-                        deck.audio.playbackRate =
-                            1 +
-                            Number(
-                                event.target.value
-                            ) / 100;
-
-
-                        $(
-                            `pitchValue${letter}`
-                        )
-                            .textContent =
-                            `${event.target.value}%`;
-                    }
-                );
-
-
-            $(`low${letter}`)
-                .addEventListener(
-                    "input",
-                    event => {
-
-                        const deck =
-                            state.decks[letter];
-
-                        if (deck) {
-
-                            deck.low.gain.value =
-                                event.target.value;
-                        }
-                    }
-                );
-
-
-            $(`mid${letter}`)
-                .addEventListener(
-                    "input",
-                    event => {
-
-                        const deck =
-                            state.decks[letter];
-
-                        if (deck) {
-
-                            deck.mid.gain.value =
-                                event.target.value;
-                        }
-                    }
-                );
-
-
-            $(`high${letter}`)
-                .addEventListener(
-                    "input",
-                    event => {
-
-                        const deck =
-                            state.decks[letter];
-
-                        if (deck) {
-
-                            deck.high.gain.value =
-                                event.target.value;
-                        }
-                    }
-                );
-        }
-    );
-
-
-    $("smartAutoBtn")
-        .addEventListener(
-            "click",
-            toggleSmartAutoDJ
-        );
-
-
-    $("smartNextBtn")
-        .addEventListener(
-            "click",
-            smartNext
-        );
-
-
-    $("libraryFiles")
-        .addEventListener(
-            "change",
-            event =>
-                addLibraryFiles(
-                    event.target.files
-                )
-        );
-
-
-    $("libraryFolder")
-        .addEventListener(
-            "change",
-            event =>
-                addLibraryFiles(
-                    event.target.files
-                )
-        );
-
-
-    $("analyzeLibrary")
-        .addEventListener(
-            "click",
-            analyzeLibrary
-        );
-
-
-    $("genreFilter")
-        .addEventListener(
-            "change",
-            renderLibrary
-        );
-
-
-    $("voiceFiles")
-        .addEventListener(
-            "change",
-            event =>
-                loadVoiceFiles(
-                    event.target.files
-                )
-        );
-
-
-    $("voiceEnabled")
-        .addEventListener(
-            "change",
-            event => {
-
-                state.voiceEnabled =
-                    event.target.checked;
-
-
-                $("voiceStatus")
-                    .textContent =
-                    state.voiceEnabled
-                        ? "AUTO"
-                        : "OFF";
-
-
-                startVoiceTimer();
-            }
-        );
-
-
-    $("voiceTest")
-        .addEventListener(
-            "click",
-            playVoiceID
-        );
-
-
-    $("recordButton")
-        .addEventListener(
-            "click",
-            toggleRecording
-        );
-}
-
-
-/* =========================================================
-   SMART AUTO DJ ON/OFF
-========================================================= */
-
-async function toggleSmartAutoDJ() {
-
-    await startEngine();
-
-
-    state.autoDJ =
-        !state.autoDJ;
-
-
-    const button =
-        $("smartAutoBtn");
-
-
-    const dot =
-        document.querySelector(
-            ".engine-dot"
-        );
-
-
-    if (state.autoDJ) {
-
-        button.textContent =
-            "SMART AUTO DJ: ON";
-
-
-        button.classList.add(
-            "active"
-        );
-
-
-        dot.classList.add(
-            "active"
-        );
-
-
-        $("autoState")
-            .textContent =
-            "SMART DJ ACTIVO";
-
-
-        /*
-           Si ya hay una canción reproduciendo,
-           prepara inmediatamente el siguiente
-           plato.
-        */
-
-        const active =
-            state.decks[
-                state.activeDeck
-            ];
-
-
-        if (
-            active &&
-            active.ready
-        ) {
-
-            if (
-                active.audio.paused
-            ) {
-
-                try {
-                    await active.audio.play();
-                } catch (_) {}
-            }
-
-
-            await smartNext();
-
-        } else {
-
-            /*
-               Si no hay nada activo,
-               busca el primer tema analizado.
-            */
-
-            const first =
-                state.library.find(
-                    track =>
-                        track.analyzed
-                );
-
-
-            if (first) {
-
-                await loadTrackSmart(
-                    first,
-                    "A"
-                );
-
-
-                state.activeDeck =
-                    "A";
-
-
-                setCrossPosition(
-                    0,
-                    true
-                );
-
-
-                await playDeck("A");
-
-
-                await smartNext();
-            }
-        }
+      await document.documentElement
+        .requestFullscreen();
 
     } else {
 
-        button.textContent =
-            "SMART AUTO DJ: OFF";
+      await document
+        .exitFullscreen();
 
-
-        button.classList.remove(
-            "active"
-        );
-
-
-        dot.classList.remove(
-            "active"
-        );
-
-
-        $("autoState")
-            .textContent =
-            "ESPERA";
     }
+
+  } catch (error) {
+
+    console.error(
+      "Fullscreen:",
+      error
+    );
+
+  }
+
 }
+
+
+document.addEventListener(
+  "fullscreenchange",
+  () => {
+
+    const active =
+      !!document.fullscreenElement;
+
+
+    document.body
+      .classList.toggle(
+        "fullscreen-mode",
+        active
+      );
+
+
+    $("fullscreenButton")
+      .textContent =
+      active
+        ? "⛶ SALIR PANTALLA COMPLETA"
+        : "⛶ PANTALLA COMPLETA";
+
+  }
+);
 
 
 /* =========================================================
@@ -4069,124 +3647,106 @@ async function toggleSmartAutoDJ() {
 ========================================================= */
 
 document.addEventListener(
-    "keydown",
-    event => {
+  "keydown",
+  async event => {
 
-        if (
-            event.target.tagName ===
-            "INPUT"
-        ) {
-            return;
-        }
+    if (
+      event.target.tagName ===
+      "INPUT"
+    ) {
 
+      return;
 
-        switch (
-            event.code
-        ) {
-
-            case "Space":
-
-                event.preventDefault();
-
-                const active =
-                    state.decks[
-                        state.activeDeck
-                    ];
-
-                if (active?.ready) {
-
-                    if (
-                        active.audio.paused
-                    ) {
-                        playDeck(
-                            state.activeDeck
-                        );
-                    } else {
-                        active.audio.pause();
-                    }
-                }
-
-                break;
-
-
-            case "ArrowLeft":
-
-                setCrossPosition(
-                    state.crossPosition -
-                    .05
-                );
-
-                break;
-
-
-            case "ArrowRight":
-
-                setCrossPosition(
-                    state.crossPosition +
-                    .05
-                );
-
-                break;
-
-
-            case "KeyA":
-
-                if (!event.ctrlKey) {
-
-                    state.activeDeck =
-                        "A";
-
-                    setCrossPosition(
-                        0
-                    );
-
-                    updateVisualDeck(
-                        "A"
-                    );
-                }
-
-                break;
-
-
-            case "KeyB":
-
-                if (!event.ctrlKey) {
-
-                    state.activeDeck =
-                        "B";
-
-                    setCrossPosition(
-                        1
-                    );
-
-                    updateVisualDeck(
-                        "B"
-                    );
-                }
-
-                break;
-        }
     }
+
+
+    if (
+      event.code ===
+      "Space"
+    ) {
+
+      event.preventDefault();
+
+
+      const deck =
+        state.decks[
+          state.activeDeck
+        ];
+
+
+      if (!deck.file) return;
+
+
+      if (
+        deck.playing
+      ) {
+
+        deck.audio.pause();
+
+      } else {
+
+        await ensureAudio();
+
+        await deck.audio.play();
+
+      }
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "f"
+    ) {
+
+      toggleFullscreen();
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "n"
+    ) {
+
+      await ensureAudio();
+
+      await smartNext(true);
+
+    }
+
+
+    if (
+      event.key.toLowerCase() ===
+      "a"
+    ) {
+
+      await ensureAudio();
+
+      toggleAutoDJ();
+
+    }
+
+  }
 );
 
 
 /* =========================================================
-   INITIALIZE
+   DEBUG
 ========================================================= */
 
-document.addEventListener(
-    "DOMContentLoaded",
-    () => {
+window.HCProDJ = {
 
-        setupControls();
+  state,
 
-        /*
-           La interfaz se prepara,
-           pero AudioContext solamente se
-           inicia mediante interacción del usuario.
-        */
+  smartNext,
 
-        $("crossfader").value =
-            .5;
-    }
-);
+  transitionTo,
+
+  toggleAutoDJ,
+
+  loadTrackSmart,
+
+  analyzeLibrary
+
+};
