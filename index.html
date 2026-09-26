@@ -1,690 +1,346 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>HC PRO DJ HUMBERTO</title>
+  <title>HC PRO DJ HUMBERTO</title>
 
-<link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#05070d">
+
+  <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
 
-<div class="background-grid"></div>
-<div class="ambient ambient-one"></div>
-<div class="ambient ambient-two"></div>
+<div id="bootOverlay" class="boot-overlay">
+  <div class="boot-box">
+    <div class="boot-logo">HC PRO</div>
+    <h1>DJ HUMBERTO</h1>
+    <p>PROFESSIONAL SMART DJ SYSTEM</p>
+
+    <button id="startEngine" class="main-start">
+      ▶ INICIAR HC PRO DJ
+    </button>
+
+    <small>
+      El navegador solicitará permiso para utilizar audio.
+    </small>
+  </div>
+</div>
+
 
 <header class="topbar">
 
-    <div class="brand">
-        <span class="brand-small">HC PRO</span>
-        <h1>DJ HUMBERTO</h1>
-        <span class="brand-sub">PROFESSIONAL SMART DJ SYSTEM</span>
-    </div>
+  <div class="brand">
+    <span class="brand-small">HC PRO</span>
+    <span class="brand-main">DJ HUMBERTO</span>
+  </div>
 
-    <div class="system-status">
-        <span id="systemLed"></span>
-        <span id="systemStatus">SISTEMA DETENIDO</span>
-    </div>
+  <div class="top-status">
 
-    <div id="clock" class="clock">00:00:00</div>
+    <span id="engineStatus" class="status-pill offline">
+      ● SISTEMA OFF
+    </span>
+
+    <button id="fullscreenButton" class="fullscreen-button">
+      ⛶ PANTALLA COMPLETA
+    </button>
+
+  </div>
 
 </header>
 
 
 <main class="app">
 
-    <!-- =====================================================
-         VIDEO / VISUALIZADOR
-    ====================================================== -->
 
-    <section class="visual-section">
+  <!-- =====================================================
+       MEDIA
+  ====================================================== -->
 
-        <div class="visual-header">
+  <section class="media-panel">
 
-            <div>
-                <span class="section-label">LIVE PERFORMANCE</span>
-                <h2>SMART DJ VISUAL ENGINE</h2>
-            </div>
+    <div class="media-screen">
 
-            <div class="active-info">
-                <span>PLATO ACTIVO</span>
-                <strong id="activeDeckLabel">A</strong>
-            </div>
+      <video
+        id="videoScreen"
+        playsinline
+        muted
+        preload="metadata">
+      </video>
 
-        </div>
+      <canvas id="visualizer"></canvas>
 
-        <div class="visual-screen">
+      <div class="media-vignette"></div>
 
-            <video
-                id="videoScreen"
-                playsinline
-                muted
-                preload="metadata">
-            </video>
+      <div class="dj-logo-top">
 
-            <canvas id="visualizer"></canvas>
+        <span>HC PRO</span>
 
-            <div class="visual-overlay"></div>
+        <strong class="dj-rainbow-title">
+          <i>D</i>
+          <i>J</i>
+          <i>&nbsp;</i>
+          <i>H</i>
+          <i>U</i>
+          <i>M</i>
+          <i>B</i>
+          <i>E</i>
+          <i>R</i>
+          <i>T</i>
+          <i>O</i>
+        </strong>
 
-            <div class="dj-logo-top">
-                <span>HC PRO</span>
-                <strong>DJ HUMBERTO</strong>
-            </div>
+      </div>
 
-            <div class="visual-bottom">
+      <div id="mediaStatus" class="media-status">
+        ESPERANDO REPRODUCCIÓN
+      </div>
 
-                <div>
-                    <span id="mediaType">AUDIO PERFORMANCE</span>
-                </div>
-
-                <div id="visualTrack">
-                    SMART DJ READY
-                </div>
-
-            </div>
-
-            <div id="visualMessage" class="visual-message">
-                CARGÁ TU BIBLIOTECA MUSICAL
-            </div>
-
-        </div>
-
-    </section>
-
-
-    <!-- =====================================================
-         PLATOS
-    ====================================================== -->
-
-    <section class="decks">
-
-        <!-- PLATO A -->
-
-        <article class="deck deck-a" id="deckPanelA">
-
-            <div class="deck-header">
-
-                <div>
-                    <span class="deck-number">DECK A</span>
-                    <h2>A</h2>
-                </div>
-
-                <div id="statusA" class="deck-status">
-                    READY
-                </div>
-
-            </div>
-
-            <div class="turntable">
-
-                <div class="platter">
-                    <div class="platter-ring"></div>
-                    <div class="platter-label">
-                        <span>DJ HC</span>
-                    </div>
-                    <div class="platter-center"></div>
-                </div>
-
-            </div>
-
-            <div class="track-info">
-
-                <strong id="trackA">
-                    Sin canción
-                </strong>
-
-                <div class="track-meta">
-
-                    <span id="bpmA">BPM --</span>
-                    <span id="keyA">KEY --</span>
-                    <span id="camelotA">--</span>
-                    <span id="energyA">ENERGY --</span>
-
-                </div>
-
-            </div>
-
-            <div class="deck-controls">
-
-                <button id="loadA" class="control-button">
-                    CARGAR
-                </button>
-
-                <input
-                    id="fileA"
-                    type="file"
-                    accept="audio/*,video/*"
-                    hidden>
-
-                <button id="playA" class="play-button">
-                    ▶
-                </button>
-
-                <button id="stopA" class="control-button">
-                    ■
-                </button>
-
-            </div>
-
-            <div class="control-group">
-
-                <label>
-                    VOLUMEN
-                    <output id="volumeValueA">100%</output>
-                </label>
-
-                <input
-                    id="volumeA"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value="1">
-
-            </div>
-
-            <div class="control-group">
-
-                <label>
-                    PITCH
-                    <output id="pitchValueA">0%</output>
-                </label>
-
-                <input
-                    id="pitchA"
-                    type="range"
-                    min="-8"
-                    max="8"
-                    step="0.1"
-                    value="0">
-
-            </div>
-
-            <div class="eq">
-
-                <div>
-                    <label>LOW</label>
-                    <input id="lowA" type="range" min="-12" max="12" value="0">
-                </div>
-
-                <div>
-                    <label>MID</label>
-                    <input id="midA" type="range" min="-12" max="12" value="0">
-                </div>
-
-                <div>
-                    <label>HIGH</label>
-                    <input id="highA" type="range" min="-12" max="12" value="0">
-                </div>
-
-            </div>
-
-        </article>
-
-
-        <!-- MIXER CENTRAL -->
-
-        <section class="mixer">
-
-            <div class="mixer-title">
-                <span>MIXER</span>
-                <strong>HC PRO</strong>
-            </div>
-
-            <div class="master">
-
-                <label>
-                    MASTER
-                    <output id="masterValue">85%</output>
-                </label>
-
-                <input
-                    id="master"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value="0.85">
-
-            </div>
-
-
-            <div class="cross-section">
-
-                <div class="cross-title">
-                    <span>A</span>
-                    <strong>CROSSFADER</strong>
-                    <span>B</span>
-                </div>
-
-                <input
-                    id="crossfader"
-                    class="crossfader"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.001"
-                    value="0.5">
-
-                <div class="cross-status">
-                    <span id="crossPosition">CENTER</span>
-                </div>
-
-            </div>
-
-
-            <div class="smart-engine">
-
-                <div class="engine-title">
-                    <span class="engine-dot"></span>
-                    SMART AUTO DJ
-                </div>
-
-                <button
-                    id="smartAutoBtn"
-                    class="smart-button">
-                    SMART AUTO DJ: OFF
-                </button>
-
-                <button
-                    id="smartNextBtn"
-                    class="next-button">
-                    SMART NEXT
-                </button>
-
-                <div class="engine-info">
-
-                    <div>
-                        <span>PRÓXIMO</span>
-                        <strong id="nextDeck">B</strong>
-                    </div>
-
-                    <div>
-                        <span>ESTADO</span>
-                        <strong id="autoState">ESPERA</strong>
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <div class="mix-meter">
-
-                <div class="meter-label">
-                    <span>A</span>
-                    <span id="meterAText">0%</span>
-                </div>
-
-                <div class="meter">
-                    <span id="meterA"></span>
-                </div>
-
-                <div class="meter-label">
-                    <span>B</span>
-                    <span id="meterBText">0%</span>
-                </div>
-
-                <div class="meter">
-                    <span id="meterB"></span>
-                </div>
-
-            </div>
-
-
-            <div class="master-buttons">
-
-                <button id="stopAll" class="danger-button">
-                    STOP ALL
-                </button>
-
-                <button id="recordButton" class="record-button">
-                    ● REC
-                </button>
-
-            </div>
-
-        </section>
-
-
-        <!-- PLATO B -->
-
-        <article class="deck deck-b" id="deckPanelB">
-
-            <div class="deck-header">
-
-                <div>
-                    <span class="deck-number">DECK B</span>
-                    <h2>B</h2>
-                </div>
-
-                <div id="statusB" class="deck-status">
-                    READY
-                </div>
-
-            </div>
-
-            <div class="turntable">
-
-                <div class="platter">
-                    <div class="platter-ring"></div>
-                    <div class="platter-label">
-                        <span>HC PRO</span>
-                    </div>
-                    <div class="platter-center"></div>
-                </div>
-
-            </div>
-
-            <div class="track-info">
-
-                <strong id="trackB">
-                    Sin canción
-                </strong>
-
-                <div class="track-meta">
-
-                    <span id="bpmB">BPM --</span>
-                    <span id="keyB">KEY --</span>
-                    <span id="camelotB">--</span>
-                    <span id="energyB">ENERGY --</span>
-
-                </div>
-
-            </div>
-
-            <div class="deck-controls">
-
-                <button id="loadB" class="control-button">
-                    CARGAR
-                </button>
-
-                <input
-                    id="fileB"
-                    type="file"
-                    accept="audio/*,video/*"
-                    hidden>
-
-                <button id="playB" class="play-button">
-                    ▶
-                </button>
-
-                <button id="stopB" class="control-button">
-                    ■
-                </button>
-
-            </div>
-
-            <div class="control-group">
-
-                <label>
-                    VOLUMEN
-                    <output id="volumeValueB">100%</output>
-                </label>
-
-                <input
-                    id="volumeB"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value="1">
-
-            </div>
-
-            <div class="control-group">
-
-                <label>
-                    PITCH
-                    <output id="pitchValueB">0%</output>
-                </label>
-
-                <input
-                    id="pitchB"
-                    type="range"
-                    min="-8"
-                    max="8"
-                    step="0.1"
-                    value="0">
-
-            </div>
-
-            <div class="eq">
-
-                <div>
-                    <label>LOW</label>
-                    <input id="lowB" type="range" min="-12" max="12" value="0">
-                </div>
-
-                <div>
-                    <label>MID</label>
-                    <input id="midB" type="range" min="-12" max="12" value="0">
-                </div>
-
-                <div>
-                    <label>HIGH</label>
-                    <input id="highB" type="range" min="-12" max="12" value="0">
-                </div>
-
-            </div>
-
-        </article>
-
-    </section>
-
-
-    <!-- =====================================================
-         SMART DJ / BIBLIOTECA
-    ====================================================== -->
-
-    <section class="library-section">
-
-        <div class="section-title">
-
-            <div>
-                <span class="section-label">INTELLIGENT MUSIC MANAGEMENT</span>
-                <h2>SMART DJ LIBRARY</h2>
-            </div>
-
-            <div class="library-counter">
-                <strong id="libraryCount">0</strong>
-                <span>TEMAS</span>
-            </div>
-
-        </div>
-
-
-        <div class="library-actions">
-
-            <label class="file-button">
-                AGREGAR ARCHIVOS
-                <input
-                    id="libraryFiles"
-                    type="file"
-                    multiple
-                    accept="audio/*,video/*">
-            </label>
-
-            <label class="file-button">
-                AGREGAR CARPETA
-                <input
-                    id="libraryFolder"
-                    type="file"
-                    multiple
-                    webkitdirectory
-                    directory
-                    accept="audio/*,video/*">
-            </label>
-
-            <button id="analyzeLibrary" class="analyze-button">
-                ANALIZAR BIBLIOTECA
-            </button>
-
-            <select id="genreFilter">
-                <option value="all">TODOS LOS GÉNEROS</option>
-                <option value="pop">POP</option>
-                <option value="rock">ROCK</option>
-                <option value="cumbia">CUMBIA</option>
-                <option value="reggaeton">REGGAETÓN</option>
-                <option value="electronic">ELECTRÓNICA</option>
-                <option value="latin">LATINO</option>
-                <option value="other">OTROS</option>
-            </select>
-
-        </div>
-
-
-        <div class="smart-analysis">
-
-            <div class="analysis-card">
-                <span>BPM</span>
-                <strong id="analysisBpm">--</strong>
-            </div>
-
-            <div class="analysis-card">
-                <span>KEY</span>
-                <strong id="analysisKey">--</strong>
-            </div>
-
-            <div class="analysis-card">
-                <span>CAMELOT</span>
-                <strong id="analysisCamelot">--</strong>
-            </div>
-
-            <div class="analysis-card">
-                <span>ENERGÍA</span>
-                <strong id="analysisEnergy">--</strong>
-            </div>
-
-            <div class="analysis-card">
-                <span>RITMO</span>
-                <strong id="analysisRhythm">--</strong>
-            </div>
-
-            <div class="analysis-card">
-                <span>PHRASE</span>
-                <strong id="analysisPhrase">--</strong>
-            </div>
-
-        </div>
-
-
-        <div id="smartReason" class="smart-reason">
-            Smart DJ esperando biblioteca...
-        </div>
-
-
-        <div id="libraryList" class="library-list">
-
-            <div class="empty-library">
-                CARGÁ ARCHIVOS O UNA CARPETA MUSICAL
-            </div>
-
-        </div>
-
-    </section>
-
-
-    <!-- =====================================================
-         VOICE ID
-    ====================================================== -->
-
-    <section class="voice-section">
-
-        <div class="section-title">
-
-            <div>
-                <span class="section-label">STATION IDENTIFICATION</span>
-                <h2>VOICE ID</h2>
-            </div>
-
-            <div id="voiceStatus">
-                OFF
-            </div>
-
-        </div>
-
-
-        <div class="voice-grid">
-
-            <label class="file-button">
-                CARGAR VOICE ID
-                <input
-                    id="voiceFiles"
-                    type="file"
-                    multiple
-                    accept="audio/*">
-            </label>
-
-            <select id="voiceInterval">
-
-                <option value="5">CADA 5 MINUTOS</option>
-                <option value="10" selected>CADA 10 MINUTOS</option>
-                <option value="15">CADA 15 MINUTOS</option>
-
-            </select>
-
-            <label class="switch-row">
-
-                <input id="voiceEnabled" type="checkbox">
-
-                <span>
-                    VOICE ID AUTOMÁTICO
-                </span>
-
-            </label>
-
-            <button id="voiceTest" class="control-button">
-                PROBAR VOICE ID
-            </button>
-
-        </div>
-
-        <div id="voiceList" class="voice-list">
-            No hay Voice ID cargados.
-        </div>
-
-    </section>
-
-
-</main>
-
-
-<audio id="audioA" preload="metadata"></audio>
-<audio id="audioB" preload="metadata"></audio>
-<audio id="voiceAudio" preload="auto"></audio>
-
-
-<div id="bootScreen" class="boot-screen">
-
-    <div class="boot-box">
-
-        <div class="boot-logo">
-            HC PRO
-        </div>
-
-        <h2>DJ HUMBERTO</h2>
-
-        <p>
-            PROFESSIONAL SMART DJ SYSTEM
-        </p>
-
-        <button id="startEngine" class="start-button">
-            INICIAR SISTEMA
-        </button>
-
-        <small>
-            El navegador requiere una interacción para activar el audio.
-        </small>
+      <div class="video-brand-bottom">
+        HC PRO • SMART DJ
+      </div>
 
     </div>
 
-</div>
+  </section>
 
 
-<script src="dj.js"></script>
 
-</body>
-</html>
+  <!-- =====================================================
+       DECKS
+  ====================================================== -->
+
+  <section class="decks">
+
+
+    <!-- ================= DECK A ================= -->
+
+    <article id="deckPanelA" class="deck deck-a">
+
+      <div class="deck-header">
+
+        <div>
+          <span class="deck-label">PLATO</span>
+          <strong>A</strong>
+        </div>
+
+        <span id="statusA" class="deck-status">
+          VACÍO
+        </span>
+
+      </div>
+
+
+      <div class="platter-area">
+
+        <div id="platterA" class="platter">
+
+          <div class="platter-ring"></div>
+
+          <div class="platter-center">
+            <span>HC</span>
+            <small>PRO</small>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <div class="track-info">
+
+        <div id="trackA" class="track-name">
+          Sin canción
+        </div>
+
+        <div class="track-meta">
+
+          <span>
+            BPM
+            <b id="bpmA">--</b>
+          </span>
+
+          <span>
+            KEY
+            <b id="keyA">--</b>
+          </span>
+
+          <span>
+            CAMELOT
+            <b id="camelotA">--</b>
+          </span>
+
+          <span>
+            ENERGY
+            <b id="energyA">--</b>
+          </span>
+
+        </div>
+
+      </div>
+
+
+      <div class="deck-controls">
+
+        <label>
+          VOLUME
+          <input
+            id="volumeA"
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            value="1">
+        </label>
+
+        <label>
+          PITCH
+          <input
+            id="pitchA"
+            type="range"
+            min="0.92"
+            max="1.08"
+            step="0.001"
+            value="1">
+        </label>
+
+      </div>
+
+
+      <div class="eq">
+
+        <label>
+          LOW
+          <input id="lowA" type="range" min="-12" max="12" value="0">
+        </label>
+
+        <label>
+          MID
+          <input id="midA" type="range" min="-12" max="12" value="0">
+        </label>
+
+        <label>
+          HIGH
+          <input id="highA" type="range" min="-12" max="12" value="0">
+        </label>
+
+      </div>
+
+
+      <div class="deck-actions">
+
+        <button id="playA" class="deck-play">
+          ▶ PLAY A
+        </button>
+
+        <button id="stopA">
+          ■ STOP
+        </button>
+
+      </div>
+
+    </article>
+
+
+
+    <!-- ================= DECK B ================= -->
+
+    <article id="deckPanelB" class="deck deck-b">
+
+      <div class="deck-header">
+
+        <div>
+          <span class="deck-label">PLATO</span>
+          <strong>B</strong>
+        </div>
+
+        <span id="statusB" class="deck-status">
+          VACÍO
+        </span>
+
+      </div>
+
+
+      <div class="platter-area">
+
+        <div id="platterB" class="platter">
+
+          <div class="platter-ring"></div>
+
+          <div class="platter-center">
+            <span>HC</span>
+            <small>PRO</small>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <div class="track-info">
+
+        <div id="trackB" class="track-name">
+          Sin canción
+        </div>
+
+        <div class="track-meta">
+
+          <span>
+            BPM
+            <b id="bpmB">--</b>
+          </span>
+
+          <span>
+            KEY
+            <b id="keyB">--</b>
+          </span>
+
+          <span>
+            CAMELOT
+            <b id="camelotB">--</b>
+          </span>
+
+          <span>
+            ENERGY
+            <b id="energyB">--</b>
+          </span>
+
+        </div>
+
+      </div>
+
+
+      <div class="deck-controls">
+
+        <label>
+          VOLUME
+          <input
+            id="volumeB"
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            value="1">
+        </label>
+
+        <label>
+          PITCH
+          <input
+            id="pitchB"
+            type="range"
+            min="0.92"
+            max="1.08"
+            step="0.001"
+            value="1">
+        </label>
+
+      </div>
+
+
+      <div class="eq">
+
+        <label>
+          LOW
+          <input id="lowB" type="range" min="-12" max="
